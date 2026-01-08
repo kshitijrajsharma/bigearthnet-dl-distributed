@@ -92,12 +92,17 @@ cd bigearthnet-dl-distributed
 uv sync
 ```
 
+This installs the project and makes the following commands available:
+- `uv run gen-metadata` - Generate metadata with S3 paths
+- `uv run check-s3` - Validate file availability
+- `uv run to-tfrecord` - Convert TIF to TFRecord
+- `uv run train-model` - Train segmentation model
+
 ## Usage
 
-Use JupyterLab, VS Code, or Jupyter Notebook to work with notebooks.
+See [scripts/Readme.md](scripts/Readme.md) for detailed usage examples and parameters.
 
-**Convert notebooks to scripts:**
-```bash
+Use JupyterLab, VS Code, or Jupyter Notebook to work with notebooks.
 jupyter nbconvert --to script notebooks/01-preliminary.ipynb --output-dir=scripts/
 ```
 

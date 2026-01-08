@@ -17,32 +17,32 @@ Complete workflow for processing 0.1% of the dataset:
 
 ```bash
 # 1. Generate metadata with S3 paths
-uv run scripts/gen_metadata.py \
+uv run gen-metadata \
   --meta s3://ubs-datasets/bigearthnet/metadata.parquet \
   --out s3://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet
 
 # 2. Validate files (optional)
-uv run scripts/check.py \
+uv run check-s3 \
   --meta s3://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet \
-  --out s3://ubs-homes/erasmus/raj/dlproject/tfrecords/1percent/validation.json \
+  --out s3://ubs-homes/erasmus/raj/dlproject/1percent/validation.json \
   --frac 0.001 \
   --workers 50
 
 # 3. Convert to TFRecord
-uv run scripts/to_tfrecord.py \
+uv run to-tfrecord \
   --meta s3://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet \
-  --out s3://ubs-homes/erasmus/raj/dlproject/tfrecords/1percent \
+  --out s3://ubs-homes/erasmus/raj/dlproject/1percent/tfrecords \
   --frac 0.001 \
   --workers 10 \
   --batch 100
 
-# 4. Train model (reads directly from S3)
-uv run scripts/train.py \
-  --data s3://ubs-homes/erasmus/raj/dlproject/tfrecords/1percent \
+# 4. Train model (saves to S3)
+uv run train-model \
+  --data s3://ubs-homes/erasmus/raj/dlproject/1percent/tfrecords \
   --epochs 10 \
   --batch 32 \
   --lr 0.001 \
-  --save model.keras
+  --save s3://ubs-homes/erasmus/raj/dlproject/1percent/model.keras
 ```
 
 ## Data Organization
@@ -52,16 +52,21 @@ S3 structure:
 ```
 s3://bucket/dlproject/
 ├── metadata_with_paths.parquet
-└── tfrecords/
-    ├── 1percent/
-    │   ├── validation.json
+├── 1percent/
+│   ├── validation.json
+│   ├── tfrecords/
+│   │   └── part-*.tfrecord
+│   └── model.keras
+├── 10percent/
+│   ├── validation.json
+│   ├── tfrecords/
+│   │   └── part-*.tfrecord
+│   └── model.keras
+└── full/
+    ├── validation.json
+    ├── tfrecords/
     │   └── part-*.tfrecord
-    ├── 10percent/
-    │   ├── validation.json
-    │   └── part-*.tfrecord
-    └── full/
-        ├── validation.json
-        └── part-*.tfrecord
+    └── model.keras
 ```
 
 ## Parameters
@@ -92,7 +97,7 @@ s3://bucket/dlproject/
 - `--epochs` - Training epochs (default: 10)
 - `--batch` - Batch size (default: 32)
 - `--lr` - Learning rate (default: 0.001)
-- `--save` - Model output path (.keras)
+- `--save` - Model output path (local or S3, .keras format)
 
 ## Data Format
 

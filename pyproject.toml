@@ -20,3 +20,4 @@ dependencies = [
 gen-metadata = "scripts.gen_metadata:main"
 check-s3 = "scripts.check:main"
 to-tfrecord = "scripts.to_tfrecord:main"
+train-model = "scripts.train:main"

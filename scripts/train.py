@@ -2,6 +2,8 @@
 
 import argparse
 import glob
+import os
+import tempfile
 import boto3
 import tensorflow as tf
 
@@ -115,8 +117,22 @@ def main():
     model, _ = train_model(args.data, args.epochs, args.batch, args.lr)
     
     if args.save:
-        model.save(args.save)
-        print(f"Model saved to {args.save}")
+        if args.save.startswith('s3://'):
+            # Save to S3
+            with tempfile.TemporaryDirectory() as tmpdir:
+                local_path = os.path.join(tmpdir, 'model.keras')
+                model.save(local_path)
+                
+                # Upload to S3
+                s3_path = args.save.replace('s3://', '')
+                bucket, key = s3_path.split('/', 1)
+                s3_client = boto3.client('s3')
+                s3_client.upload_file(local_path, bucket, key)
+                print(f"Model saved to {args.save}")
+        else:
+            # Save locally
+            model.save(args.save)
+            print(f"Model saved to {args.save}")
 
 if __name__ == "__main__":
     main()

@@ -14,6 +14,10 @@ A distributed deep learning project for large-scale remote sensing data analysis
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-Deep%20Learning-FF6F00?style=flat&logo=tensorflow&logoColor=white)
 ![Petastorm](https://img.shields.io/badge/Petastorm-Data%20Pipeline-00ADD8?style=flat&logo=apache&logoColor=white)
 
+s3+petastorm + tensorflow pipeline 
+
+<img width="1291" height="371" alt="image" src="https://github.com/user-attachments/assets/6e2ebb0c-e5a4-4865-913b-c46d39f2cd7d" />
+
 
 ## About the Project
 

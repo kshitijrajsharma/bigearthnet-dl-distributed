@@ -8,6 +8,18 @@ import boto3
 from rasterio.io import MemoryFile
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from tqdm import tqdm
+from petastorm.codecs import CompressedImageCodec, NdarrayCodec
+from petastorm.etl.dataset_metadata import materialize_dataset
+from petastorm.unischema import Unischema, UnischemaField, dict_to_spark_row
+
+# Define schema for BigEarthNet data
+BigEarthNetSchema = Unischema('BigEarthNetSchema', [
+    UnischemaField('patch_id', np.str_, (), NdarrayCodec(), False),
+    UnischemaField('s1_data', np.float32, (120, 120, 2), NdarrayCodec(), False),
+    UnischemaField('s2_data', np.float32, (120, 120, 12), NdarrayCodec(), False),
+    UnischemaField('reference', np.uint8, (120, 120), NdarrayCodec(), False),
+    UnischemaField('labels', np.str_, (), NdarrayCodec(), False),
+])
 
 def read_s3_tif(s3_path):
     """Read TIF file from S3 directly into memory"""
@@ -53,19 +65,14 @@ def process_patch(row_dict, target_size=(120, 120)):
             s2_band_arrays.append(band_data)
         s2_data = np.stack(s2_band_arrays, axis=-1).astype(np.float32)
         
-        # Process reference map
-        reference = pad_to_size(file_data['reference'], target_size)
-        reference = np.expand_dims(reference, axis=-1).astype(np.uint8)
+        reference = pad_to_size(file_data['reference'], target_size).astype(np.uint8)
         
         return {
             'patch_id': row_dict['patch_id'],
-            's1_data': s1_data.tobytes(),
-            's2_data': s2_data.tobytes(),
-            'reference': reference.tobytes(),
+            's1_data': s1_data,
+            's2_data': s2_data,
+            'reference': reference,
             'labels': ','.join(row_dict['labels']),
-            's1_shape': s1_data.shape,
-            's2_shape': s2_data.shape,
-            'ref_shape': reference.shape,
         }
     except Exception as e:
         print(f"Error processing {row_dict['patch_id']}: {e}")
@@ -80,72 +87,53 @@ def sample_stratified(df, fraction):
     return sampled.reset_index(drop=True)
 
 def convert_files(metadata_path, output_path, fraction=1.0, workers=10, batch_size=100):
-    # Read metadata
     print(f"Reading metadata from {metadata_path}")
     table = pq.read_table(metadata_path)
     df = table.to_pandas()
+    print(f"Total patches: {len(df)}")
     
-    print(f"Total patches in metadata: {len(df)}")
-    
-    # Apply stratified sampling
     if fraction < 1.0:
         df = sample_stratified(df, fraction)
         print(f"Sampled {len(df)} patches ({fraction*100:.1f}% stratified by split)")
     
     print(f"Processing {len(df)} patches with {workers} workers")
     
-    # Define PyArrow schema
-    schema = pa.schema([
-        ('patch_id', pa.string()),
-        ('s1_data', pa.binary()),
-        ('s2_data', pa.binary()),
-        ('reference', pa.binary()),
-        ('labels', pa.string()),
-        ('s1_shape', pa.list_(pa.int32())),
-        ('s2_shape', pa.list_(pa.int32())),
-        ('ref_shape', pa.list_(pa.int32())),
-    ])
+    # Materialize dataset metadata for Petastorm
+    output_url = output_path if output_path.startswith('file://') or output_path.startswith('s3://') else f"file://{output_path}"
     
-    # Process in batches and write incrementally
-    s3_client = boto3.client('s3')
-    bucket, key_prefix = output_path.replace('s3://', '').split('/', 1)
-    
-    batch_num = 0
-    records = df.to_dict('records')
-    
-    for i in tqdm(range(0, len(records), batch_size), desc="Processing batches"):
-        batch = records[i:i+batch_size]
+    with materialize_dataset(spark=None, output_url=output_url, schema=BigEarthNetSchema):
+        records = df.to_dict('records')
+        batch_num = 0
         
-        # Process batch in parallel
-        with ProcessPoolExecutor(max_workers=workers) as executor:
-            futures = [executor.submit(process_patch, row) for row in batch]
-            results = [f.result() for f in as_completed(futures) if f.result() is not None]
-        
-        if not results:
-            continue
+        for i in tqdm(range(0, len(records), batch_size), desc="Processing batches"):
+            batch = records[i:i+batch_size]
             
-        # Create PyArrow table from batch
-        batch_table = pa.table({
-            'patch_id': [r['patch_id'] for r in results],
-            's1_data': [r['s1_data'] for r in results],
-            's2_data': [r['s2_data'] for r in results],
-            'reference': [r['reference'] for r in results],
-            'labels': [r['labels'] for r in results],
-            's1_shape': [list(r['s1_shape']) for r in results],
-            's2_shape': [list(r['s2_shape']) for r in results],
-            'ref_shape': [list(r['ref_shape']) for r in results],
-        }, schema=schema)
-        
-        # Write to S3
-        output_key = f"{key_prefix}/part-{batch_num:05d}.parquet"
-        pq.write_table(batch_table, f"s3://{bucket}/{output_key}")
-        
-        print(f"Wrote batch {batch_num} with {len(results)} patches")
-        batch_num += 1
+            with ProcessPoolExecutor(max_workers=workers) as executor:
+                futures = [executor.submit(process_patch, row) for row in batch]
+                results = [f.result() for f in as_completed(futures) if f.result() is not None]
+            
+            if not results:
+                continue
+            
+            # Convert to Petastorm rows
+            rows = [dict_to_spark_row(BigEarthNetSchema, r) for r in results]
+            
+            # Write with PyArrow
+            table = pa.Table.from_pydict({
+                'patch_id': [r['patch_id'] for r in results],
+                's1_data': [r['s1_data'] for r in results],
+                's2_data': [r['s2_data'] for r in results],
+                'reference': [r['reference'] for r in results],
+                'labels': [r['labels'] for r in results],
+            })
+            
+            output_file = f"{output_path}/part-{batch_num:05d}.parquet"
+            pq.write_table(table, output_file)
+            batch_num += 1
+            print(f"Wrote batch {batch_num}")
     
     print(f"\nDataset saved to {output_path}")
     print(f"Total batches: {batch_num}")
-    print(f"Fraction processed: {fraction*100:.1f}%")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Convert BigEarthNet to Parquet format')

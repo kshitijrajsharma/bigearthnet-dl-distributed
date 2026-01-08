@@ -5,9 +5,9 @@ Validates that all BigEarthNet dataset files (S1, S2, and reference maps) exist 
 Reads metadata parquet, checks each patch's S1/S2/reference paths, and outputs results as JSON.
 
 Usage:
-    python scripts/check_s3_files.py \
-        --metadata-path s3://bucket/path/metadata.parquet \
-        --output-path s3://bucket/path/results.json
+    python scripts/check_s3_files.py --metadata-path s3://bucket/path/metadata.parquet --output-path s3://bucket/path/results.json
+
+    uv run scripts/check_s3_files.py --metadata-path s3://ubs-homes/erasmus/raj/bigearth/metadata.parquet --output-path s3://ubs-homes/erasmus/raj/bigearth/s3_files_existence_scan.json
 
 Output JSON contains:
     - all_files_found: count of patches with all files present

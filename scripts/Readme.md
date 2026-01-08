@@ -1,93 +1,106 @@
-# BigEarthNet Pipeline
+# Scripts
 
-Complete workflow for BigEarthNet satellite imagery: metadata generation, validation, TFRecord conversion, and U-Net training.
+End-to-end pipeline for BigEarthNet satellite imagery processing and training.
 
-## Workflow
+## Overview
 
-### 1. Generate Metadata with S3 Paths
+1. **gen_metadata.py** - Add S3 paths to metadata
+2. **check.py** - Validate file availability on S3
+3. **to_tfrecord.py** - Convert TIF files to TFRecord format
+4. **train.py** - Train U-Net segmentation model
+
+## Usage
+
+### Example: 0.1% Data Pipeline
+
+Complete workflow for processing 0.1% of the dataset:
 
 ```bash
+# 1. Generate metadata with S3 paths
 uv run scripts/gen_metadata.py \
   --meta s3://ubs-datasets/bigearthnet/metadata.parquet \
   --out s3://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet
-```
 
-### 2. Validate S3 Files
-
-```bash
+# 2. Validate files (optional)
 uv run scripts/check.py \
   --meta s3://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet \
-  --out s3://ubs-homes/erasmus/raj/dlproject/validation.json \
+  --out s3://ubs-homes/erasmus/raj/dlproject/tfrecords/1percent/validation.json \
   --frac 0.001 \
   --workers 50
-```
 
-### 3. Convert to TFRecord
-
-```bash
-# Test: 0.1% data (~480 patches) - saves directly to S3
+# 3. Convert to TFRecord
 uv run scripts/to_tfrecord.py \
   --meta s3://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet \
-  --out s3://ubs-homes/erasmus/raj/dlproject/tfrecords_test \
-  --frac 0.001
+  --out s3://ubs-homes/erasmus/raj/dlproject/tfrecords/1percent \
+  --frac 0.001 \
+  --workers 10 \
+  --batch 100
 
-# Production: full dataset - saves directly to S3
-uv run scripts/to_tfrecord.py \
-  --meta s3://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet \
-  --out s3://ubs-homes/erasmus/raj/dlproject/tfrecords_full \
-  --workers 20
+# 4. Train model (reads directly from S3)
+uv run scripts/train.py \
+  --data s3://ubs-homes/erasmus/raj/dlproject/tfrecords/1percent \
+  --epochs 10 \
+  --batch 32 \
+  --lr 0.001 \
+  --save model.keras
 ```
 
-### 4. Train Model
+## Data Organization
 
-```bash
-# Download test data first
-aws s3 sync s3://ubs-homes/erasmus/raj/dlproject/tfrecords_test ./data
+S3 structure:
 
-# Quick test: 2 epochs
-uv run python scripts/train.py --data ./data --epochs 2 --batch 8
-
-# Production: 50 epochs with model save
-uv run python scripts/train.py --data ./data --epochs 50 --batch 32 --save model.keras
+```
+s3://bucket/dlproject/
+├── metadata_with_paths.parquet
+└── tfrecords/
+    ├── 1percent/
+    │   ├── validation.json
+    │   └── part-*.tfrecord
+    ├── 10percent/
+    │   ├── validation.json
+    │   └── part-*.tfrecord
+    └── full/
+        ├── validation.json
+        └── part-*.tfrecord
 ```
 
 ## Parameters
 
-**gen_metadata.py**
-- `--meta`: S3 path to base metadata parquet
-- `--out`: Output path for augmented metadata
+### gen_metadata.py
 
-**check.py**
-- `--meta`: S3 path to metadata with file paths
-- `--out`: Output path for validation results
-- `--frac`: Data fraction for validation (default: 1.0)
-- `--workers`: Parallel workers (default: 50)
+- `--meta` - Input metadata parquet path
+- `--out` - Output path for augmented metadata
 
-**to_tfrecord.py**
-- `--meta`: S3 path to metadata parquet
-- `--out`: Output directory
-- `--frac`: Data fraction (0.001-1.0, default: 1.0)
-- `--workers`: Parallel workers (default: 10)
-- `--batch`: Patches per file (default: 100)
+### check.py
 
-**train.py**
-- `--data`: TFRecord directory path
-- `--epochs`: Training epochs (default: 10)
-- `--batch`: Batch size (default: 32)
-- `--lr`: Learning rate (default: 0.001)
-- `--save`: Model output path (.keras)
+- `--meta` - Metadata parquet with file paths
+- `--out` - Output path for validation results
+- `--frac` - Data fraction (0-1, default: 1.0)
+- `--workers` - Parallel workers (default: 50)
 
-## Data Scale
+### to_tfrecord.py
 
-| Fraction | Patches |
-|----------|---------|
-| 0.001 | 480 |
-| 0.01 | 4,800 |
-| 0.1 | 48,000 |
-| 1.0 | 480,038 |
+- `--meta` - Metadata parquet path
+- `--out` - Output directory
+- `--frac` - Data fraction (0-1, default: 1.0)
+- `--workers` - Parallel workers (default: 10)
+- `--batch` - Patches per file (default: 100)
 
-## Format
+### train.py
 
-**TFRecord**: `patch_id` (string), `s1_data` (120x120x2 float32), `s2_data` (120x120x12 float32), `label` (120x120 uint8)
+- `--data` - TFRecord directory (local or S3 path)
+- `--epochs` - Training epochs (default: 10)
+- `--batch` - Batch size (default: 32)
+- `--lr` - Learning rate (default: 0.001)
+- `--save` - Model output path (.keras)
 
-**Model**: U-Net encoder-decoder, 120x120x14 input, 256 output classes, ~947K params
+## Data Format
+
+**TFRecord fields:**
+
+- `patch_id` (string)
+- `s1_data` (120x120x2 float32)
+- `s2_data` (120x120x12 float32)
+- `label` (120x120 uint8)
+
+**Model:** U-Net encoder-decoder with 120x120x14 input and 256 output classes.

@@ -2,6 +2,7 @@
 
 import argparse
 import glob
+import boto3
 import tensorflow as tf
 
 def parse_tfrecord(serialized_example):
@@ -46,8 +47,28 @@ def build_unet_model():
 
 def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
     """Train segmentation model on TFRecord dataset."""
-    # Load TFRecord files
-    tfrecord_files = glob.glob(f"{data_path}/*.tfrecord")
+    # Load TFRecord files from local path or S3
+    if data_path.startswith('s3://'):
+        # Parse S3 path
+        s3_path = data_path.replace('s3://', '')
+        bucket, prefix = s3_path.split('/', 1)
+        
+        # List all .tfrecord files in S3
+        s3_client = boto3.client('s3')
+        response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
+        
+        if 'Contents' not in response:
+            raise ValueError(f"No files found in {data_path}")
+        
+        tfrecord_files = [
+            f"s3://{bucket}/{obj['Key']}" 
+            for obj in response['Contents'] 
+            if obj['Key'].endswith('.tfrecord')
+        ]
+    else:
+        # Local file system
+        tfrecord_files = glob.glob(f"{data_path}/*.tfrecord")
+    
     if not tfrecord_files:
         raise ValueError(f"No TFRecord files found in {data_path}")
     print(f"Found {len(tfrecord_files)} TFRecord files in {data_path}")

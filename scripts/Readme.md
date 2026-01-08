@@ -25,13 +25,13 @@ uv run scripts/check.py \
 ### 3. Convert to TFRecord
 
 ```bash
-# Test: 0.1% data (~480 patches)
+# Test: 0.1% data (~480 patches) - saves directly to S3
 uv run scripts/to_tfrecord.py \
   --meta s3://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet \
   --out s3://ubs-homes/erasmus/raj/dlproject/tfrecords_test \
   --frac 0.001
 
-# Production: full dataset
+# Production: full dataset - saves directly to S3
 uv run scripts/to_tfrecord.py \
   --meta s3://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet \
   --out s3://ubs-homes/erasmus/raj/dlproject/tfrecords_full \
@@ -41,6 +41,9 @@ uv run scripts/to_tfrecord.py \
 ### 4. Train Model
 
 ```bash
+# Download test data first
+aws s3 sync s3://ubs-homes/erasmus/raj/dlproject/tfrecords_test ./data
+
 # Quick test: 2 epochs
 uv run python scripts/train.py --data ./data --epochs 2 --batch 8
 

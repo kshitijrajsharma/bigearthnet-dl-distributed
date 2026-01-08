@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import tempfile
 import boto3
 import numpy as np
 import tensorflow as tf
@@ -102,7 +103,11 @@ def convert_files(metadata_path, output_path, fraction=1.0, workers=10, batch_si
         print(f"Sampled {len(df)} patches ({fraction*100:.1f}% stratified by split)")
     
     print(f"Processing {len(df)} patches with {workers} workers")
-    os.makedirs(output_path, exist_ok=True)
+    
+    # Create output directory (local or S3)
+    is_s3 = output_path.startswith('s3://')
+    if not is_s3:
+        os.makedirs(output_path, exist_ok=True)
     
     # Process in batches
     records = df.to_dict('records')
@@ -122,9 +127,24 @@ def convert_files(metadata_path, output_path, fraction=1.0, workers=10, batch_si
         
         # Write batch to TFRecord
         output_file = f"{output_path}/part-{file_num:05d}.tfrecord"
-        with tf.io.TFRecordWriter(output_file) as writer:
-            for r in results:
-                writer.write(serialize_example(r['patch_id'], r['s1_data'], r['s2_data'], r['label']))
+        
+        if is_s3:
+            # Write to temp file then upload to S3
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.tfrecord') as tmp:
+                with tf.io.TFRecordWriter(tmp.name) as writer:
+                    for r in results:
+                        writer.write(serialize_example(r['patch_id'], r['s1_data'], r['s2_data'], r['label']))
+                
+                # Upload to S3
+                s3_client = boto3.client('s3')
+                bucket, key = output_file.replace('s3://', '').split('/', 1)
+                s3_client.upload_file(tmp.name, bucket, key)
+                os.unlink(tmp.name)
+        else:
+            with tf.io.TFRecordWriter(output_file) as writer:
+                for r in results:
+                    writer.write(serialize_example(r['patch_id'], r['s1_data'], r['s2_data'], r['label']))
         
         file_num += 1
     

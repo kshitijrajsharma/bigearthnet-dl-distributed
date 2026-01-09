@@ -65,7 +65,7 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
         s3_files = [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.tfrecord')]
         print(f"Found {len(s3_files)} TFRecord files in S3, downloading...")
         
-        temp_dir = tempfile.mkdtemp()
+        temp_dir = tempfile.mkdtemp() # TODO : avoid this , we need to stream directly from s3 and use petastorm or something for cache this is almost bullshit but i wanted something that works so that i can visualize the training 
         tfrecord_files = []
         
         for s3_key in s3_files:

@@ -43,8 +43,8 @@ def build_unet_model():
         tf.keras.layers.Conv2D(128, 3, activation='relu', padding='same'),
         tf.keras.layers.UpSampling2D(),
         tf.keras.layers.Conv2D(64, 3, activation='relu', padding='same'),
-        # Output: 256 classes (CLC codes) per pixel
-        tf.keras.layers.Conv2D(256, 1, activation='softmax'),
+        # Output: 44 classes (CLC codes) per pixel
+        tf.keras.layers.Conv2D(44, 1, activation='softmax'),
     ])
 
 def train_model(data_path, epochs=10, batch_size=32, lr=0.001):

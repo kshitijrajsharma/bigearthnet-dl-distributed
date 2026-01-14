@@ -13,6 +13,7 @@ from petastorm.unischema import Unischema, UnischemaField, dict_to_spark_row
 from petastorm.codecs import NdarrayCodec, ScalarCodec
 
 
+
 def read_s3_tif(s3_path):
     """Download and read GeoTIFF from S3."""
     s3_client = boto3.client('s3')
@@ -123,7 +124,6 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, target_size=(1
     output_paths = {}
 
     # Spark session required for Petastorm
-    # CRITICAL: Override time-unit configs that cause NumberFormatException
     spark = SparkSession.builder \
         .master(spark_master) \
         .appName("Petastorm_BigEarthNet") \
@@ -135,15 +135,7 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, target_size=(1
         .config("spark.hadoop.fs.s3a.aws.credentials.provider", "com.amazonaws.auth.DefaultAWSCredentialsProviderChain") \
         .config("spark.hadoop.fs.s3a.path.style.access", "true") \
         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "true") \
-        .config("spark.hadoop.fs.s3a.connection.timeout", "600000") \
-        .config("spark.hadoop.fs.s3a.connection.establish.timeout", "600000") \
-        .config("spark.hadoop.fs.s3a.attempts.maximum", "10") \
-        .config("spark.hadoop.fs.s3a.retry.interval", "5000") \
-        .config("spark.hadoop.fs.s3a.experimental.input.fadvise", "random") \
-        .config("spark.hadoop.fs.s3a.connection.idle.time", "60000") \
-        .config("spark.hadoop.fs.s3a.connection.ttl", "300000") \
-        .getOrCreate()
-    
+        .getOrCreate()  
 
     sc = spark.sparkContext
 
@@ -223,8 +215,8 @@ if __name__ == "__main__":
 ## run using the command:
 # uv run to-petastorm \
 #     --meta s3://ubs-homes/erasmus/ethel/bigearth/metadata_with_paths.parquet \
-#     --out s3a://ubs-homes/erasmus/ethel/bigearth/1percent/petastorm \
-#     --frac 0.001 \
+#     --out s3a://ubs-homes/erasmus/ethel/bigearth/1percent/petastorm \ 
+#     --frac 0.01 \
 #     --workers 10 \
 #     --target_size 120 120 \
 #     --spark_mem 8g \

@@ -96,7 +96,7 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
     num_gpus = strategy.num_replicas_in_sync
 
     train_path = normalize_path(os.path.join(data_path, "train"))
-    val_path = normalize_path(os.path.join(data_path, "val"))
+    val_path = normalize_path(os.path.join(data_path, "validation"))
     test_path = normalize_path(os.path.join(data_path, "test"))
 
     print(f"Streaming data from:  {data_path}")

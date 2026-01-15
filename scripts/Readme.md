@@ -27,7 +27,7 @@ uv run gen-metadata --meta s3://ubs-datasets/bigearthnet/metadata.parquet --out 
 uv run check-s3 --meta s3://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet --out s3://ubs-homes/erasmus/raj/dlproject/1percent/validation.json --frac 0.001 --workers 50
 ```
 
-**Step 3: Convert to TFRecord**
+**Step 3: Convert to Petastorm**
 
 ```bash
 uv run to-petastorm --meta s3://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet --out s3://ubs-homes/erasmus/raj/dlproject/1percent/petastorm --frac 0.001 --workers 10 --batch 100
@@ -36,7 +36,7 @@ uv run to-petastorm --meta s3://ubs-homes/erasmus/raj/dlproject/metadata_with_pa
 **Step 4: Train model**
 
 ```bash
-uv run train-model --data s3://ubs-homes/erasmus/raj/dlproject/1percent/petastorm --epochs 10 --batch 32 --lr 0.001 --save s3://ubs-homes/erasmus/raj/dlproject/1percent/model.keras
+uv run scripts/train.py --data s3://ubs-homes/erasmus/ethel/bigearth/peta_trial_v2
 ```
 
 ## Data Organization

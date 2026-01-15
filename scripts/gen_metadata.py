@@ -31,8 +31,8 @@ def generate_metadata_with_paths(input_path, output_path):
 
 def main():
     parser = argparse.ArgumentParser(description='Generate BigEarthNet metadata with S3 paths')
-    parser.add_argument('--meta', required=True, help='S3 path to input metadata parquet')
-    parser.add_argument('--out', required=True, help='S3 path for output metadata with paths')
+    parser.add_argument('--meta', default="s3://ubs-datasets/bigearthnet/metadata.parquet", help='S3 path to input metadata parquet')
+    parser.add_argument('--out', default="s3://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet", help='S3 path for output metadata with paths')
     args = parser.parse_args()
     generate_metadata_with_paths(args.meta, args.out)
 

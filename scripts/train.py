@@ -178,9 +178,9 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
 
 def main():
     parser = argparse.ArgumentParser(description="Train BigEarthNet segmentation model")
-    parser.add_argument("--data", required=True, help="Petastorm dataset path (contains train/validation/test)")
+    parser.add_argument("--data", default="s3://ubs-homes/erasmus/raj/dlproject/testpercent/petastorm", help="Petastorm dataset path (contains train/validation/test)")
     parser.add_argument("--epochs", type=int, default=5, help="Training epochs")
-    parser.add_argument("--batch", type=int, default=32, help="Batch size per replica")
+    parser.add_argument("--batch", type=int, default=16, help="Batch size per replica")
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
     
     args = parser.parse_args()

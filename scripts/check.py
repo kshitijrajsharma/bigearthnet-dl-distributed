@@ -101,9 +101,9 @@ def check_files(metadata_path, output_path, fraction=1.0, workers=50):
 
 def main():
     parser = argparse.ArgumentParser(description='Check BigEarthNet files on S3 with parallel requests')
-    parser.add_argument('--meta', required=True, help='S3 path to metadata parquet')
-    parser.add_argument('--out', required=True, help='S3 or local path for output JSON')
-    parser.add_argument('--frac', type=float, default=1.0, help='Fraction (0.0-1.0), stratified by split')
+    parser.add_argument('--meta', default="s3://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet", help='S3 path to metadata parquet')
+    parser.add_argument('--out', default="s3://ubs-homes/erasmus/raj/dlproject/check_s3/validation.json", help='S3 or local path for output JSON')
+    parser.add_argument('--frac', type=float, default=0.001, help='Fraction (0.0-1.0), stratified by split')
     parser.add_argument('--workers', type=int, default=50, help='Parallel workers')
     args = parser.parse_args()
     if not 0 < args.frac <= 1.0:

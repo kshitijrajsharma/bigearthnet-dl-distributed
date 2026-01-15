@@ -1,88 +1,82 @@
-"""Train semantic segmentation model on BigEarthNet using Petastorm."""
+"""Train semantic segmentation model on BigEarthNet using Petastorm.
+uv run scripts/train.py --data s3://ubs-homes/erasmus/ethel/bigearth/peta_trial_v2
+"""
 
 import argparse
 import os
-import tempfile
 import warnings
-
-# import boto3
 import tensorflow as tf
 from petastorm import make_reader
 from pyarrow import parquet as pq
 
-warnings.filterwarnings(
-    "ignore", category=FutureWarning, module="petastorm"
-)  # petastorm warnings due to lib depreceation is causing me headache so lets supress this
+warnings.filterwarnings("ignore", category=FutureWarning, module="petastorm")
 
 
-def transform_row(row):
-    """Transform Petastorm row into training format."""
-    return row["input_data"], row["label"]
+def print_gpu_info():
+    """Print GPU count and memory."""
+    gpus = tf.config.list_physical_devices('GPU')
+    print(f"\nGPUs detected: {len(gpus)}")
+    
+    if gpus:
+        for i, gpu in enumerate(gpus):
+            try:
+                gpu_details = tf.config.experimental.get_device_details(gpu)
+                print(f"GPU {i}:  {gpu_details}")
+            except: 
+                print(f"GPU {i}: info unavailable")
+    else:
+        print("WARNING: No GPUs - training on CPU")
+    print()
 
 
 def build_unet_model():
-    """Build U-Net style encoder-decoder for semantic segmentation."""
-    return tf.keras.Sequential(
-        [
-            tf.keras.layers.Input(shape=(120, 120, 6)),
-            tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same"),
-            tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same"),
-            tf.keras.layers.MaxPooling2D(),
-            tf.keras.layers.Conv2D(128, 3, activation="relu", padding="same"),
-            tf.keras.layers.Conv2D(128, 3, activation="relu", padding="same"),
-            tf.keras.layers.MaxPooling2D(),
-            tf.keras.layers.Conv2D(256, 3, activation="relu", padding="same"),
-            tf.keras.layers.UpSampling2D(),
-            tf.keras.layers.Conv2D(128, 3, activation="relu", padding="same"),
-            tf.keras.layers.UpSampling2D(),
-            tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same"),
-            tf.keras.layers.Conv2D(256, 1, activation="softmax"),
-        ]
+    """Build U-Net encoder-decoder for semantic segmentation."""
+    return tf.keras.Sequential([
+        tf.keras.layers.Input(shape=(120, 120, 6)),
+        tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same"),
+        tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same"),
+        tf.keras.layers.MaxPooling2D(),
+        tf.keras.layers. Conv2D(128, 3, activation="relu", padding="same"),
+        tf.keras.layers.Conv2D(128, 3, activation="relu", padding="same"),
+        tf.keras.layers.MaxPooling2D(),
+        tf.keras.layers. Conv2D(256, 3, activation="relu", padding="same"),
+        tf.keras.layers. UpSampling2D(),
+        tf.keras.layers. Conv2D(128, 3, activation="relu", padding="same"),
+        tf.keras.layers.UpSampling2D(),
+        tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same"),
+        tf.keras.layers.Conv2D(256, 1, activation="softmax"),
+    ])
+
+
+def make_dataset(path, batch_size, shuffle=True):
+    """Create optimized tf.data pipeline from Petastorm."""
+    def gen():
+        with make_reader(path, num_epochs=None, hdfs_driver="libhdfs3",
+                        reader_pool_type="thread", workers_count=2) as reader:
+            for sample in reader:
+                yield sample. input_data, sample.label
+
+    dataset = tf.data.Dataset.from_generator(
+        gen,
+        output_signature=(
+            tf.TensorSpec(shape=(120, 120, 6), dtype=tf.float32),
+            tf.TensorSpec(shape=(120, 120), dtype=tf.uint8),
+        ),
     )
-
-
-def make_dataset_fn(path, batch_size, shard_count, shuffle=True):
-    def dataset_fn(input_context):
-        cur_shard = input_context.input_pipeline_id if input_context else 0
-        per_replica_batch_size = (
-            input_context.get_per_replica_batch_size(batch_size)
-            if input_context
-            else batch_size
-        )
-
-        def gen():
-            with make_reader(
-                path,
-                num_epochs=None,
-                hdfs_driver="libhdfs3",
-                reader_pool_type="thread",
-                workers_count=1,
-                shard_count=shard_count,
-                cur_shard=cur_shard,
-            ) as reader:
-                for sample in reader:
-                    yield {"input_data": sample.input_data, "label": sample.label}
-
-        dataset = tf.data.Dataset.from_generator(
-            gen,
-            output_signature={
-                "input_data": tf.TensorSpec(shape=(120, 120, 6), dtype=tf.float32),
-                "label": tf.TensorSpec(shape=(120, 120), dtype=tf.uint8),
-            },
-        )
-
-        dataset = dataset.map(
-            lambda x: (x["input_data"], x["label"]), num_parallel_calls=tf.data.AUTOTUNE
-        )
-
-        if shuffle:
-            dataset = dataset.shuffle(1000)
-
-        dataset = dataset.batch(per_replica_batch_size).prefetch(tf.data.AUTOTUNE)
-
-        return dataset
-
-    return dataset_fn
+    
+    options = tf.data.Options()
+    options.experimental_optimization.map_parallelization = True
+    options.experimental_optimization.parallel_batch = True
+    options.threading.private_threadpool_size = 4
+    dataset = dataset.with_options(options)
+    
+    if shuffle:
+        dataset = dataset. shuffle(1000)
+    
+    dataset = dataset.batch(batch_size)
+    dataset = dataset.prefetch(tf.data.AUTOTUNE)
+    
+    return dataset
 
 
 def normalize_path(path):
@@ -93,85 +87,80 @@ def normalize_path(path):
 
 
 def get_dataset_size(path):
-    """Get number of samples in Petastorm dataset by reading _metadata file."""
+    """Get number of samples from _common_metadata file."""
     try:
-        dataset_path = (
-            path.replace("file://", "") if not path.startswith("s3://") else path
-        )
-        # because petastorm writes metadata in  _common_metadata
-        metadata_path = (
-            os.path.join(dataset_path, "_common_metadata")
-            if not path.startswith("s3://")
-            else f"{dataset_path}/_metadata"
-        )  # we need to write metadata so we can read it here , TODO : to tell ethel to debug if this is getting generated well
-
+        dataset_path = path. replace("file://", "") if not path.startswith("s3://") else path
+        metadata_path = os.path.join(dataset_path, "_common_metadata") if not path.startswith("s3://") else f"{dataset_path}/_metadata"
         metadata = pq.read_metadata(metadata_path)
-        print(metadata)
-        total_rows = metadata.num_rows
-        print(f"Dataset {path}: {total_rows} samples")
-        return total_rows
-    except Exception as e:
-        print(f"Warning: Could not read _metadata for {path}: {e}, using defaults")
+        print(f"Dataset {path. split('/')[-1]}: {metadata.num_rows} samples")
+        return metadata.num_rows
+    except Exception as e: 
+        print(f"Warning: Could not read metadata for {path}: {e}")
         return None
 
 
-def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
-    """Train segmentation model streaming from Petastorm dataset (local or S3)."""
-    strategy = (
-        tf.distribute.MirroredStrategy()
-    )  # setup the gpu distribution strategy for multiple gpu per machine as shown in class
-    num_gpus = strategy.num_replicas_in_sync
+def verify_s3_paths(base_path):
+    """Verify train/validation/test folders exist in S3."""
+    if base_path.startswith(("s3://", "s3a://")):
+        import s3fs
+        s3 = s3fs.S3FileSystem()
+        clean_base = base_path.replace("s3://", "").replace("s3a://", "")
+        
+        for split in ["train", "validation", "test"]:
+            path = f"{clean_base}/{split}"
+            if not s3.exists(path):
+                raise FileNotFoundError(f"S3 path does not exist: s3://{path}")
+            print(f"Found s3://{path}")
 
+
+def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
+    """Train segmentation model with distributed strategy."""
+    
+    print_gpu_info()
+    
+    if data_path.startswith("s3"):
+        verify_s3_paths(data_path)
+    
+    strategy = tf.distribute.MirroredStrategy()
+    num_replicas = strategy.num_replicas_in_sync
+    global_batch_size = batch_size * num_replicas
+    
+    print(f"Distribution strategy: {strategy.__class__.__name__}")
+    print(f"Number of devices: {num_replicas}")
+    print(f"Global batch size: {global_batch_size}\n")
+    
     train_path = normalize_path(os.path.join(data_path, "train"))
     val_path = normalize_path(os.path.join(data_path, "validation"))
-    test_path = normalize_path(os.path.join(data_path, "test"))
-
-    print(f"Streaming data from:  {data_path}")
-    print(f"Number of gpu devices:  {num_gpus}")
-
+    test_path = normalize_path(os. path.join(data_path, "test"))
+    
     train_samples = get_dataset_size(train_path)
     val_samples = get_dataset_size(val_path)
     test_samples = get_dataset_size(test_path)
-
-    steps_per_epoch = (train_samples // batch_size) if train_samples else 38
-    validation_steps = (val_samples // batch_size) if val_samples else 10
-    test_steps = (test_samples // batch_size) if test_samples else 10
-
-    print(
-        f"Dataset sizes - Train: {train_samples}, Val:  {val_samples}, Test: {test_samples}"
-    )
-    print(f"Steps per epoch: {steps_per_epoch}, Validation steps: {validation_steps}")
-
-    train_ds = strategy.distribute_datasets_from_function(
-        make_dataset_fn(train_path, batch_size, shard_count=num_gpus, shuffle=True)
-    )  # distributed dataset with data sharding per GPU
-
-    val_ds = strategy.distribute_datasets_from_function(
-        make_dataset_fn(val_path, batch_size, shard_count=num_gpus, shuffle=False)
-    )
-
-    test_ds = strategy.distribute_datasets_from_function(
-        make_dataset_fn(test_path, batch_size, shard_count=num_gpus, shuffle=False)
-    )
-
-    with (
-        strategy.scope()
-    ):  # put the model creation and compilation inside the strategy scope so it would be distributed
+    
+    steps_per_epoch = (train_samples // global_batch_size) if train_samples else 38
+    validation_steps = (val_samples // global_batch_size) if val_samples else 10
+    test_steps = (test_samples // global_batch_size) if test_samples else 10
+    
+    print(f"Steps/epoch: {steps_per_epoch}, Validation:  {validation_steps}, Test: {test_steps}\n")
+    
+    with strategy.scope():
+        train_ds = make_dataset(train_path, global_batch_size, shuffle=True)
+        val_ds = make_dataset(val_path, global_batch_size, shuffle=False)
+        test_ds = make_dataset(test_path, global_batch_size, shuffle=False)
+        
         model = build_unet_model()
         model.compile(
-            optimizer=tf.keras.optimizers.Adam(lr),
+            optimizer=tf. keras.optimizers.Adam(lr),
             loss="sparse_categorical_crossentropy",
             metrics=["accuracy"],
         )
-
+    
     print(model.summary())
-
+    
     callbacks = [
-        tf.keras.callbacks.EarlyStopping(
-            monitor="val_loss", patience=5, restore_best_weights=True
-        )
+        tf.keras. callbacks.EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True),
     ]
-
+    
     history = model.fit(
         train_ds,
         epochs=epochs,
@@ -180,47 +169,23 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
         validation_steps=validation_steps,
         callbacks=callbacks,
     )
-
-    test_results = model.evaluate(test_ds, steps=test_steps)
-    print(test_results)
-    print(f"\nTest loss:  {test_results[0]}, Test accuracy: {test_results[1]}")
-
-    print(f"Training complete! Final accuracy: {history.history['accuracy'][-1]}")
+    
+    test_loss, test_acc = model.evaluate(test_ds, steps=test_steps)
+    print(f"\nTest Loss:  {test_loss:.4f}, Test Accuracy: {test_acc:.4f}")
+    print(f"Final Train Accuracy: {history.history['accuracy'][-1]:.4f}\n")
+    
     return model, history
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Train BigEarthNet semantic segmentation model"
-    )
-    parser.add_argument(
-        "--data",
-        required=True,
-        help="Path to Petastorm dataset directory (contains train/ and test/ folders)",
-    )
-    parser.add_argument(
-        "--epochs", type=int, default=10, help="Number of training epochs"
-    )
-    parser.add_argument("--batch", type=int, default=32, help="Batch size")
+    parser = argparse.ArgumentParser(description="Train BigEarthNet segmentation model")
+    parser.add_argument("--data", required=True, help="Petastorm dataset path (contains train/validation/test)")
+    parser.add_argument("--epochs", type=int, default=10, help="Training epochs")
+    parser.add_argument("--batch", type=int, default=32, help="Batch size per replica")
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
-    # parser.add_argument("--save", help="Path to save trained model (.keras)")
-
-    args = parser.parse_args()
-    model, _ = train_model(args.data, args.epochs, args.batch, args.lr)
-
-    # if args.save:
-    #     if args.save.startswith("s3://"):
-    #         with tempfile.TemporaryDirectory() as tmpdir:
-    #             local_path = os.path.join(tmpdir, "model.keras")
-    #             model.save(local_path)
-    #             s3_path = args.save.replace("s3://", "")
-    #             bucket, key = s3_path.split("/", 1)
-    #             s3_client = boto3.client("s3")
-    #             s3_client.upload_file(local_path, bucket, key)
-    #             print(f"Model saved to {args.save}")
-    #     else:
-    #         model.save(args.save)
-    #         print(f"Model saved to {args.save}")
+    
+    args = parser. parse_args()
+    train_model(args.data, args. epochs, args.batch, args. lr)
 
 
 if __name__ == "__main__":

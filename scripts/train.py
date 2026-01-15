@@ -1,4 +1,4 @@
-"""Train semantic segmentation model on BigEarthNet using Petastorm.
+"""Train semantic segmentation model on BigEarthNet using Petastorm.  
 uv run scripts/train.py --data s3://ubs-homes/erasmus/ethel/bigearth/peta_trial_v2
 """
 
@@ -21,8 +21,8 @@ def print_gpu_info():
         for i, gpu in enumerate(gpus):
             try:
                 gpu_details = tf.config.experimental.get_device_details(gpu)
-                print(f"GPU {i}:  {gpu_details}")
-            except: 
+                print(f"GPU {i}: {gpu_details. get('device_name', 'Unknown')}")
+            except:  
                 print(f"GPU {i}: info unavailable")
     else:
         print("WARNING: No GPUs - training on CPU")
@@ -32,7 +32,7 @@ def print_gpu_info():
 def build_unet_model():
     """Build U-Net encoder-decoder for semantic segmentation."""
     return tf.keras.Sequential([
-        tf.keras.layers.Input(shape=(120, 120, 6)),
+        tf.keras.layers. Input(shape=(120, 120, 6)),
         tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same"),
         tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same"),
         tf.keras.layers.MaxPooling2D(),
@@ -49,10 +49,10 @@ def build_unet_model():
 
 
 def make_dataset(path, batch_size, shuffle=True):
-    """Create optimized tf.data pipeline from Petastorm."""
+    """Create tf.data pipeline from Petastorm."""
     def gen():
         with make_reader(path, num_epochs=None, hdfs_driver="libhdfs3",
-                        reader_pool_type="thread", workers_count=2) as reader:
+                        reader_pool_type="thread", workers_count=4) as reader:
             for sample in reader:
                 yield sample. input_data, sample.label
 
@@ -64,16 +64,10 @@ def make_dataset(path, batch_size, shuffle=True):
         ),
     )
     
-    options = tf.data.Options()
-    options.experimental_optimization.map_parallelization = True
-    options.experimental_optimization.parallel_batch = True
-    options.threading.private_threadpool_size = 4
-    dataset = dataset.with_options(options)
+    if shuffle:  
+        dataset = dataset.shuffle(2000)
     
-    if shuffle:
-        dataset = dataset. shuffle(1000)
-    
-    dataset = dataset.batch(batch_size)
+    dataset = dataset.batch(batch_size, drop_remainder=True)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
     
     return dataset
@@ -94,7 +88,7 @@ def get_dataset_size(path):
         metadata = pq.read_metadata(metadata_path)
         print(f"Dataset {path. split('/')[-1]}: {metadata.num_rows} samples")
         return metadata.num_rows
-    except Exception as e: 
+    except Exception as e:  
         print(f"Warning: Could not read metadata for {path}: {e}")
         return None
 
@@ -122,16 +116,17 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
         verify_s3_paths(data_path)
     
     strategy = tf.distribute.MirroredStrategy()
-    num_replicas = strategy.num_replicas_in_sync
-    global_batch_size = batch_size * num_replicas
+    num_replicas = strategy.num_replicas_in_sync # here replicas are no of gpus
+    global_batch_size = batch_size * num_replicas # scale based on no of gpus available 
     
     print(f"Distribution strategy: {strategy.__class__.__name__}")
-    print(f"Number of devices: {num_replicas}")
+    print(f"Number of replicas: {num_replicas}")
+    print(f"Batch size per replica: {batch_size}")
     print(f"Global batch size: {global_batch_size}\n")
     
     train_path = normalize_path(os.path.join(data_path, "train"))
     val_path = normalize_path(os.path.join(data_path, "validation"))
-    test_path = normalize_path(os. path.join(data_path, "test"))
+    test_path = normalize_path(os.path.join(data_path, "test"))
     
     train_samples = get_dataset_size(train_path)
     val_samples = get_dataset_size(val_path)
@@ -143,14 +138,18 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
     
     print(f"Steps/epoch: {steps_per_epoch}, Validation:  {validation_steps}, Test: {test_steps}\n")
     
+    train_ds = make_dataset(train_path, batch_size, shuffle=True)
+    val_ds = make_dataset(val_path, batch_size, shuffle=False)
+    test_ds = make_dataset(test_path, batch_size, shuffle=False)
+    
+    train_ds = strategy.experimental_distribute_dataset(train_ds)
+    val_ds = strategy.experimental_distribute_dataset(val_ds)
+    test_ds = strategy.experimental_distribute_dataset(test_ds)
+    
     with strategy.scope():
-        train_ds = make_dataset(train_path, global_batch_size, shuffle=True)
-        val_ds = make_dataset(val_path, global_batch_size, shuffle=False)
-        test_ds = make_dataset(test_path, global_batch_size, shuffle=False)
-        
         model = build_unet_model()
         model.compile(
-            optimizer=tf. keras.optimizers.Adam(lr),
+            optimizer=tf.keras.optimizers.Adam(lr),
             loss="sparse_categorical_crossentropy",
             metrics=["accuracy"],
         )
@@ -172,7 +171,7 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
     
     test_loss, test_acc = model.evaluate(test_ds, steps=test_steps)
     print(f"\nTest Loss:  {test_loss:.4f}, Test Accuracy: {test_acc:.4f}")
-    print(f"Final Train Accuracy: {history.history['accuracy'][-1]:.4f}\n")
+    print(f"Final Train Accuracy:  {history.history['accuracy'][-1]:.4f}\n")
     
     return model, history
 
@@ -180,12 +179,12 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
 def main():
     parser = argparse.ArgumentParser(description="Train BigEarthNet segmentation model")
     parser.add_argument("--data", required=True, help="Petastorm dataset path (contains train/validation/test)")
-    parser.add_argument("--epochs", type=int, default=10, help="Training epochs")
+    parser.add_argument("--epochs", type=int, default=5, help="Training epochs")
     parser.add_argument("--batch", type=int, default=32, help="Batch size per replica")
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
     
-    args = parser. parse_args()
-    train_model(args.data, args. epochs, args.batch, args. lr)
+    args = parser.parse_args()
+    train_model(args.data, args.epochs, args.batch, args.lr)
 
 
 if __name__ == "__main__":

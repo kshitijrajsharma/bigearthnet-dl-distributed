@@ -1,7 +1,8 @@
 import argparse
+from io import BytesIO
 import os
 import numpy as np
-# import boto3
+import rasterio
 from rasterio.io import MemoryFile
 import pyarrow.parquet as pq
 from pyspark.sql import SparkSession
@@ -11,7 +12,7 @@ from petastorm.unischema import Unischema, UnischemaField, dict_to_spark_row
 from petastorm.codecs import NdarrayCodec, ScalarCodec
 import s3fs 
 import time 
-# # Read S3 GeoTIFF
+
 # def read_s3_tif(s3_path):
 #     """Download and read GeoTIFF from S3."""
 #     s3_client = boto3.client('s3')
@@ -21,16 +22,14 @@ import time
 #         with memfile.open() as dataset:
 #             return dataset.read()
 
-
-
 def read_s3_tif(s3_path):
-    """Download and read GeoTIFF from S3 using s3fs."""
-    s3fs = s3fs.S3FileSystem()
-    with s3fs.open(s3_path, 'rb') as f:
-        with MemoryFile(f) as memfile:
-            with memfile.open() as dataset:
-                return dataset.read()
+    """Download and read GeoTIFF from S3."""
+    fs = s3fs.S3FileSystem(anon=False)  
     
+    with fs.open(s3_path, 'rb') as f:
+        with MemoryFile(f.read()) as memfile:
+            with memfile.open() as dataset:
+                return dataset.read() 
 
 # Process a single patch
 def process_patch_stream(row_dict):
@@ -129,6 +128,8 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, target_size=(1
 
             print(f"\nProcessing {split_name} split ({len(split_df)} patches)...")
 
+            rowgroup_size_mb = 256
+
             def row_generator(index):
                 row = split_df.iloc[index]
                 patch = process_patch_stream(row)
@@ -148,7 +149,7 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, target_size=(1
                 os.makedirs(split_path, exist_ok=True)
 
             # Streaming generator into Petastorm 
-            with materialize_dataset(spark, split_path, InputSchema) as writer:
+            with materialize_dataset(spark, split_path, InputSchema, rowgroup_size_mb):
                 rows_rdd = (
                     sc.parallelize(range(len(split_df)))
                       .map(row_generator)
@@ -198,6 +199,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-

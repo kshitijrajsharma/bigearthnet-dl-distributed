@@ -60,7 +60,7 @@ def make_dataset(path, batch_size, shuffle=True):
             workers_count=4,
         ) as reader:
             for sample in reader:
-                yield sample.input_data, sample.label
+                yield sample.image, sample.label
 
     dataset = tf.data.Dataset.from_generator(
         gen,

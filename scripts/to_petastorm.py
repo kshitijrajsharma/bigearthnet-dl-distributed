@@ -7,10 +7,9 @@ import s3fs
 from petastorm.codecs import NdarrayCodec
 from petastorm.etl.dataset_metadata import materialize_dataset
 from petastorm.unischema import Unischema, UnischemaField, dict_to_spark_row
+from profiler import Profiler
 from pyspark.sql import SparkSession
 from rasterio.io import MemoryFile
-
-from .profiler import Profiler
 
 
 def read_s3_tif(s3_path):

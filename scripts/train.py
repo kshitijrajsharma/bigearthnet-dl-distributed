@@ -8,9 +8,8 @@ import warnings
 
 import tensorflow as tf
 from petastorm import make_reader
+from profiler import Profiler
 from pyarrow import parquet as pq
-
-from scripts.profiler import Profiler
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="petastorm")
 

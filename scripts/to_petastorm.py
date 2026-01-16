@@ -83,7 +83,7 @@ def convert_to_petastorm(
         )  # pyarrow doesn't support s3a either
         df = table.to_pandas()
         print(f"Total patches: {len(df)}")
-
+    profiler.record("fraction", fraction)
     profiler.record("total_patches", len(df))
 
     with profiler.step("split_and_sample", fraction=fraction):

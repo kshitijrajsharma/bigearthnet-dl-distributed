@@ -203,14 +203,16 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
         history = model.fit(
             train_ds,
             epochs=epochs,
-            steps_per_epoch=steps_per_epoch,
+            # steps_per_epoch=steps_per_epoch,
             validation_data=val_ds,
-            validation_steps=validation_steps,
+            # validation_steps=validation_steps,
             callbacks=callbacks,
         )
 
     with profiler.step("evaluation"):
-        test_loss, test_acc = model.evaluate(test_ds, steps=test_steps)
+        test_loss, test_acc = model.evaluate(test_ds)
+
+        # test_loss, test_acc = model.evaluate(test_ds, steps=test_steps)
         print(f"\nTest Loss: {test_loss:.4f}, Test Accuracy: {test_acc:.4f}")
         print(f"Final Train Accuracy: {history.history['accuracy'][-1]:.4f}\n")
 

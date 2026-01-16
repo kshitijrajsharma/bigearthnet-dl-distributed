@@ -3,6 +3,7 @@ uv run scripts/train.py --data s3://ubs-homes/erasmus/ethel/bigearth/peta_trial_
 """
 
 import argparse
+import json
 import os
 import warnings
 
@@ -87,17 +88,18 @@ def normalize_path(path):
 
 def get_dataset_size(path):
     try:
-        dataset_path = (
-            path.replace("file://", "") if not path.startswith("s3://") else path
-        )
-        metadata_path = (
-            os.path.join(dataset_path, "_common_metadata")
-            if not path.startswith("s3://")
-            else f"{dataset_path}/_metadata"
-        )
-        metadata = pq.read_metadata(metadata_path)
-        print(f"Dataset {path. split('/')[-1]}: {metadata.num_rows} samples")
-        return metadata.num_rows
+        import s3fs
+
+        s3_path = path.replace("s3a://", "s3://")  # s3fs doesn't support s3a
+        fs = s3fs.S3FileSystem(anon=False)
+        with fs.open(s3_path, "rb") as f:
+            data = json.load(f.read())
+            return (
+                data["summary"]["train_samples"],
+                data["summary"]["validation_samples"],
+                data["summary"]["test_samples"],
+            )
+
     except Exception as e:
         print(f"Warning: Could not read metadata for {path}: {e}")
         return None
@@ -148,9 +150,11 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
         val_path = normalize_path(os.path.join(data_path, "validation"))
         test_path = normalize_path(os.path.join(data_path, "test"))
 
-        train_samples = get_dataset_size(train_path)
-        val_samples = get_dataset_size(val_path)
-        test_samples = get_dataset_size(test_path)
+        profile_path = normalize_path(
+            os.path.join(data_path, "profile", "conversion_profile.json")
+        )
+
+        train_samples, val_samples, test_samples = get_dataset_size(profile_path)
 
         steps_per_epoch = (train_samples // global_batch_size) if train_samples else 38
         validation_steps = (val_samples // global_batch_size) if val_samples else 10

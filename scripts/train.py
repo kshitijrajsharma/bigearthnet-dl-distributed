@@ -51,11 +51,11 @@ def build_unet_model():
     )
 
 
-def make_dataset(path, batch_size, shuffle=True):
+def make_dataset(path, epochs, batch_size, shuffle=True):
     def gen():
         with make_reader(
             path,
-            num_epochs=None,
+            num_epochs=epochs,
             hdfs_driver="libhdfs3",
             reader_pool_type="thread",
             workers_count=4,
@@ -175,9 +175,9 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
     profiler.record("steps_per_epoch", steps_per_epoch)
 
     with profiler.step("load_datasets"):
-        train_ds = make_dataset(train_path, batch_size, shuffle=True)
-        val_ds = make_dataset(val_path, batch_size, shuffle=False)
-        test_ds = make_dataset(test_path, batch_size, shuffle=False)
+        train_ds = make_dataset(train_path, epochs, batch_size, shuffle=True)
+        val_ds = make_dataset(val_path, epochs, batch_size, shuffle=False)
+        test_ds = make_dataset(test_path, epochs, batch_size, shuffle=False)
 
         train_ds = strategy.experimental_distribute_dataset(train_ds)
         val_ds = strategy.experimental_distribute_dataset(val_ds)

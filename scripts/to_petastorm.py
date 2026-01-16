@@ -106,6 +106,7 @@ def convert_to_petastorm(
             .config(
                 "spark.hadoop.fs.s3a.impl", "org.apache.hadoop. fs.s3a.S3AFileSystem"
             )
+            .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.1")
             .config("spark.executor.memory", executor_mem)
             .config("spark.driver.memory", driver_mem)
             .config("spark.executor.instances", n_executor)

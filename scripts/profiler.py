@@ -12,6 +12,7 @@ class Profiler:
             "summary": {},
         }
         self.step_stack = []
+        self.log_messages = []
 
     @contextmanager
     def step(self, name, **meta):
@@ -34,6 +35,11 @@ class Profiler:
                 }
             )
 
+    def log(self, message):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"[{timestamp}] {message}"
+        self.log_messages.append(log_entry)
+
     def record(self, key, value):
         self.metrics["summary"][key] = value
 
@@ -54,6 +60,13 @@ class Profiler:
         json_content = json.dumps(self.metrics, indent=2)
         log_lines = [f"Profile Report - {self.metrics['start_time']}\n{'='*60}\n"]
 
+        if self.log_messages:
+            log_lines.append("\nLog Messages:\n")
+            for msg in self.log_messages:
+                log_lines.append(f"{msg}\n")
+            log_lines.append(f"\n{'='*60}\n")
+
+        log_lines.append("\nStep Durations:\n")
         for step in self.metrics["steps"]:
             meta_str = ", ".join(
                 f"{k}={v}"
@@ -65,7 +78,7 @@ class Profiler:
 
         log_lines.append(f"\n{'='*60}\n")
         log_lines.append(
-            f"Total:  {self.metrics['summary'].get('total_duration', 0):.2f}s\n"
+            f"Total:  {self.metrics['summary']. get('total_duration', 0):.2f}s\n"
         )
 
         for key, val in self.metrics["summary"].items():

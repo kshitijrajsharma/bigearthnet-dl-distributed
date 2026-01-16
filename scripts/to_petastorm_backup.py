@@ -210,7 +210,7 @@ def main():
         help="Output Petastorm dataset dir (S3 or local)",
     )
     parser.add_argument(
-        "--frac", type=float, default=1.0, help="Fraction of dataset to sample"
+        "--frac", type=float, default=0.01, help="Fraction of dataset to sample"
     )
     parser.add_argument(
         "--workers", type=int, default=10, help="Number of parallel threads"

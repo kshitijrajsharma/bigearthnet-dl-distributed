@@ -195,13 +195,13 @@ def main():
     parser.add_argument(
         "--meta",
         type=str,
-        default="s3://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet",
+        default="s3a://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet",
         help="Metadata Parquet path",
     )
     parser.add_argument(
         "--out",
         type=str,
-        default="s3://ubs-homes/erasmus/raj/dlproject/testpercent/petastorm",
+        default="s3a://ubs-homes/erasmus/raj/dlproject/testpercent/petastorm",
         help="Output Petastorm dataset dir (S3 or local)",
     )
     parser.add_argument(

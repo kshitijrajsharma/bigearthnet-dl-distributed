@@ -157,13 +157,13 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
 
         train_samples, val_samples, test_samples = get_dataset_size(profile_path)
 
-        # steps_per_epoch = (train_samples // global_batch_size) if train_samples else 38
-        # validation_steps = (val_samples // global_batch_size) if val_samples else 10
-        # test_steps = (test_samples // global_batch_size) if test_samples else 10
+        steps_per_epoch = (train_samples // global_batch_size) if train_samples else 38
+        validation_steps = (val_samples // global_batch_size) if val_samples else 10
+        test_steps = (test_samples // global_batch_size) if test_samples else 10
 
-        steps_per_epoch = 30
-        validation_steps = 10
-        test_steps = 10
+        # steps_per_epoch = 30
+        # validation_steps = 10
+        # test_steps = 10
 
         print(
             f"Steps/epoch: {steps_per_epoch}, Validation:  {validation_steps}, Test: {test_steps}\n"
@@ -203,16 +203,15 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
         history = model.fit(
             train_ds,
             epochs=epochs,
-            # steps_per_epoch=steps_per_epoch,
+            steps_per_epoch=steps_per_epoch,
             validation_data=val_ds,
-            # validation_steps=validation_steps,
+            validation_steps=validation_steps,
             callbacks=callbacks,
         )
 
     with profiler.step("evaluation"):
         test_loss, test_acc = model.evaluate(test_ds)
-
-        # test_loss, test_acc = model.evaluate(test_ds, steps=test_steps)
+        test_loss, test_acc = model.evaluate(test_ds, steps=test_steps)
         print(f"\nTest Loss: {test_loss:.4f}, Test Accuracy: {test_acc:.4f}")
         print(f"Final Train Accuracy: {history.history['accuracy'][-1]:.4f}\n")
 

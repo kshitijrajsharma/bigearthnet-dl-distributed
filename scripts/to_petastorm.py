@@ -76,7 +76,8 @@ def convert_to_petastorm(
 
     with profiler.step("read_metadata"):
         print(f"Reading metadata from {metadata_path}")
-        table = pq.read_table(metadata_path.replace("s3a://", "s3://"))
+        table = pq.read_table(metadata_path)
+        # table = pq.read_table(metadata_path.replace("s3a://", "s3://"))
         df = table.to_pandas()
         print(f"Total patches: {len(df)}")
 

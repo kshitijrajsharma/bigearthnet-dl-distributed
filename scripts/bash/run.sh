@@ -4,7 +4,7 @@
 fractions=(0.01 0.03 0.05 0.07)
 
 # Output base directory
-output_base="s3://ubs-homes/erasmus/raj/dlproject/experiments"
+output_base="s3://ubs-homes/erasmus/raj/dlproject/experiments/petastorm"
 
 # Spark parameters
 executor_mem="16g"

@@ -15,7 +15,6 @@ dependencies = [
     "nbconvert>=7.16.6",
     "petastorm<0.14",
     "pyarrow<11",
-    "tensorflow[and-cuda]<=2.17",
     "tqdm>=4.67.1",
     "numpy<2",
     "pandas<2",
@@ -36,3 +35,9 @@ packages = ["scripts"]
 dev = [
     "commitizen>=4.11.3",
 ]
+gpu = [
+    "tensorflow[and-cuda]<=2.17",
+    ]
+cpu = [
+    "tensorflow<=2.17",
+    ]

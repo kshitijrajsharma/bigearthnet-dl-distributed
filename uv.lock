@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -102,13 +102,18 @@ dependencies = [
     { name = "pyarrow" },
     { name = "rasterio" },
     { name = "s3fs" },
-    { name = "tensorflow", extra = ["and-cuda"] },
     { name = "tqdm" },
 ]
 
 [package.dev-dependencies]
+cpu = [
+    { name = "tensorflow" },
+]
 dev = [
     { name = "commitizen" },
+]
+gpu = [
+    { name = "tensorflow", extra = ["and-cuda"] },
 ]
 
 [package.metadata]
@@ -123,12 +128,13 @@ requires-dist = [
     { name = "pyarrow", specifier = "<11" },
     { name = "rasterio", specifier = ">=1.3.10" },
     { name = "s3fs", specifier = ">=0.4.2" },
-    { name = "tensorflow", extras = ["and-cuda"], specifier = "<=2.17" },
     { name = "tqdm", specifier = ">=4.67.1" },
 ]
 
 [package.metadata.requires-dev]
+cpu = [{ name = "tensorflow", specifier = "<=2.17" }]
 dev = [{ name = "commitizen", specifier = ">=4.11.3" }]
+gpu = [{ name = "tensorflow", extras = ["and-cuda"], specifier = "<=2.17" }]
 
 [[package]]
 name = "bleach"

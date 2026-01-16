@@ -13,6 +13,7 @@ from rasterio.io import MemoryFile
 
 
 def read_s3_tif(s3_path):
+    s3_path = s3_path.replace("s3a://", "s3://")  # s3fs doesn't support s3a
     fs = s3fs.S3FileSystem(anon=False)
     with fs.open(s3_path, "rb") as f:
         with MemoryFile(f.read()) as memfile:
@@ -77,7 +78,9 @@ def convert_to_petastorm(
     with profiler.step("read_metadata"):
         print(f"Reading metadata from {metadata_path}")
         # table = pq.read_table(metadata_path)
-        table = pq.read_table(metadata_path.replace("s3a://", "s3://"))
+        table = pq.read_table(
+            metadata_path.replace("s3a://", "s3://")
+        )  # pyarrow doesn't support s3a either
         df = table.to_pandas()
         print(f"Total patches: {len(df)}")
 

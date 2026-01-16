@@ -157,9 +157,13 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001):
 
         train_samples, val_samples, test_samples = get_dataset_size(profile_path)
 
-        steps_per_epoch = (train_samples // global_batch_size) if train_samples else 38
-        validation_steps = (val_samples // global_batch_size) if val_samples else 10
-        test_steps = (test_samples // global_batch_size) if test_samples else 10
+        # steps_per_epoch = (train_samples // global_batch_size) if train_samples else 38
+        # validation_steps = (val_samples // global_batch_size) if val_samples else 10
+        # test_steps = (test_samples // global_batch_size) if test_samples else 10
+
+        steps_per_epoch = 30
+        validation_steps = 10
+        test_steps = 10
 
         print(
             f"Steps/epoch: {steps_per_epoch}, Validation:  {validation_steps}, Test: {test_steps}\n"

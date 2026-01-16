@@ -93,7 +93,7 @@ def get_dataset_size(path):
         s3_path = path.replace("s3a://", "s3://")  # s3fs doesn't support s3a
         fs = s3fs.S3FileSystem(anon=False)
         with fs.open(s3_path, "r") as f:
-            print(f)
+            # print(f)
             data = json.load(f)
             return (
                 data["summary"]["train_samples"],

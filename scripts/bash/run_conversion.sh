@@ -17,8 +17,8 @@ CORES="4"
 N_EXECUTORS="3"
 SPARK_PACKAGES="ch.cern.sparkmeasure:spark-measure_2.12:0.27"
 
-# Data percentages to process
-PERCENTAGES=(1 3 5 7 10)
+# Data fraction to process
+FRACTIONS=(0.01 0.03 0.05 0.07 0.10)
 
 echo "Starting BigEarthNet conversion pipeline"
 echo "Experiment: ${EXPERIMENT_NAME}"
@@ -27,16 +27,14 @@ echo "Spark Config: Executors=${N_EXECUTORS}, Cores=${CORES}, Executor Memory=${
 echo "Spark Packages: ${SPARK_PACKAGES}"
 echo ""
 
-# Convert each percentage
-for pct in "${PERCENTAGES[@]}"; do
-    FRACTION=$(echo "scale=3; $pct / 100" | bc)
-    OUTPUT_DIR="${OUTPUT_BASE}/${pct}percent"
-    
-    echo "========================================"
-    echo "Processing ${pct}% of dataset (fraction=${FRACTION})"
+# Run for each fraction
+for frac in "${FRACTIONS[@]}"; do
+    FOLDER_NAME="frac_${frac}"
+    OUTPUT_DIR="${OUTPUT_BASE}/${FOLDER_NAME}"
+
+    echo "Processing fraction=${frac}"
     echo "Output: ${OUTPUT_DIR}"
-    echo "========================================"
-    
+
     spark-submit \
         --master yarn \
         --deploy-mode client \

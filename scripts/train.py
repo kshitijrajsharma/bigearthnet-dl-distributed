@@ -8,7 +8,6 @@ import warnings
 import tensorflow as tf
 from petastorm import make_reader
 from scripts.profiler import Profiler
-from pyarrow import parquet as pq
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="petastorm")
 
@@ -50,7 +49,7 @@ def build_unet_model():
             tf.keras.layers.UpSampling2D(),
             tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same"),
             # Output
-            tf.keras.layers.Conv2D(256, 1, activation="softmax"),
+            tf.keras.layers.Conv2D(1000, 1, activation="softmax"), # there are only 45 classes but due to class naming we are keepin 1000 here later on for efficient network it is worth mapping the classes before hand , here we would treat rest class as dummy class
         ]
     )
 
@@ -60,7 +59,7 @@ def make_dataset(path, epochs, batch_size, shuffle=True):
     def gen():
         with make_reader(
             path,
-            num_epochs=epochs,
+            # num_epochs=epochs, # let petastorm reader supply the data continiously 
             hdfs_driver="libhdfs3",
             reader_pool_type="thread",
             workers_count=4,
@@ -72,7 +71,7 @@ def make_dataset(path, epochs, batch_size, shuffle=True):
         gen,
         output_signature=(
             tf.TensorSpec(shape=(120, 120, 6), dtype=tf.float32),
-            tf.TensorSpec(shape=(120, 120), dtype=tf.uint8),
+            tf.TensorSpec(shape=(120, 120), dtype=tf.uint16), # we have the value until 999 on class name , so uint16 is required 
         ),
     )
 
@@ -80,6 +79,7 @@ def make_dataset(path, epochs, batch_size, shuffle=True):
         dataset = dataset.shuffle(2000)
 
     dataset = dataset.batch(batch_size, drop_remainder=True)
+    dataset = dataset.repeat() # let tensorflow control the epochs distribution of dataset
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
     return dataset
@@ -191,7 +191,7 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001, args_str=""):
         test_ds = make_dataset(test_path, epochs, batch_size, shuffle=False)
 
         # Distribute datasets across devices
-        train_ds = strategy.experimental_distribute_dataset(train_ds)
+        train_ds = strategy.experimental_distribute_dataset(train_ds) # this should handle the shards of dataset automatically 
         val_ds = strategy.experimental_distribute_dataset(val_ds)
         test_ds = strategy.experimental_distribute_dataset(test_ds)
 

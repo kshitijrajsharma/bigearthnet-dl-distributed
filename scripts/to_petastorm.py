@@ -83,6 +83,7 @@ def convert_to_petastorm(
     driver_mem="4g",
     core=4,
     n_executor=3,
+    p_name="conversion",
     args_str="",
 ):
     """Convert BigEarthNet TIF files to Petastorm format using Spark"""
@@ -202,7 +203,7 @@ def convert_to_petastorm(
             print("Spark session stopped.")
 
     # Step 6: Save profiling data
-    profiler.save(output_dir, name="conversion")
+    profiler.save(output_dir, name=p_name)
     return output_paths
 
 
@@ -224,6 +225,7 @@ def main():
         default="s3a://ubs-homes/erasmus/raj/dlproject/testpercent/petastorm",
         help="Output Petastorm dataset dir (S3 or local)",
     )
+    parser.add_argument("--p_name", type=str, default="conversion", help="Output profile name")
     parser.add_argument(
         "--frac", type=float, default=0.001, help="Fraction of dataset to sample"
     )
@@ -247,6 +249,7 @@ def main():
         driver_mem=args.driver_mem,
         core=args.core,
         n_executor=args.n_executor,
+        p_name=args.p_name,
         args_str=str(args),
     )
     end_time = time.time()

@@ -127,7 +127,7 @@ def verify_s3_paths(base_path):
             print(f"Found s3://{path}")
 
 
-def train_model(data_path, epochs=10, batch_size=32, lr=0.001, args_str=""):
+def train_model(data_path, epochs=10, batch_size=32, lr=0.001, p_name="train", args_str=""):
     """Train U-Net model on BigEarthNet Petastorm dataset"""
     profiler = Profiler()
     profiler.log(f"Args: {args_str}")
@@ -235,7 +235,7 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001, args_str=""):
     profiler.record("epochs_completed", len(history.history["accuracy"]))
 
     # Step 9: Save profiling data
-    profiler.save(data_path, name="train")
+    profiler.save(data_path, name=p_name)
 
     return model, history
 
@@ -247,12 +247,13 @@ def main():
         default="s3://ubs-homes/erasmus/raj/dlproject/testpercent/petastorm",
         help="Petastorm dataset path (contains train/validation/test)",
     )
+    parser.add_argument("--p_name", type=str, default="train", help="Output profile name")
     parser.add_argument("--epochs", type=int, default=10, help="Training epochs")
     parser.add_argument("--batch", type=int, default=16, help="Batch size per replica")
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
 
     args = parser.parse_args()
-    train_model(args.data, args.epochs, args.batch, args.lr, args_str=str(args))
+    train_model(args.data, args.epochs, args.batch, args.lr,args.p_name, args_str=str(args))
 
 
 if __name__ == "__main__":

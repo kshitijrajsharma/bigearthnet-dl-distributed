@@ -247,7 +247,7 @@ def main():
         default="s3://ubs-homes/erasmus/raj/dlproject/testpercent/petastorm",
         help="Petastorm dataset path (contains train/validation/test)",
     )
-    parser.add_argument("--epochs", type=int, default=5, help="Training epochs")
+    parser.add_argument("--epochs", type=int, default=10, help="Training epochs")
     parser.add_argument("--batch", type=int, default=16, help="Batch size per replica")
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
 

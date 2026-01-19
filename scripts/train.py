@@ -99,8 +99,12 @@ def normalize_path(path):
 
 def get_dataset_size(path, profiler):
     try:
-        fs = s3fs.S3FileSystem(anon=False)
-        with fs.open(path.replace("s3a://", "s3://"), "r") as f:
+        profiler.log(f"Reading dataset profile from: {path}")
+        is_s3 = path.startswith(("s3://", "s3a://"))
+        opener = s3fs.S3FileSystem(anon=False).open if is_s3 else open
+        p = path.replace("s3a://", "s3://") if is_s3 else path.replace("file://", "")
+        
+        with opener(p, "r") as f:
             s = json.load(f)["summary"]
             return s["train_samples"], s["validation_samples"], s["test_samples"]
     except Exception as e:

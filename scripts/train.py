@@ -1,6 +1,7 @@
 """Train semantic segmentation model on BigEarthNet using Petastorm."""
 import argparse
 import json
+import math
 import os
 import shutil
 import s3fs
@@ -49,7 +50,7 @@ def build_model():
         tf.keras.layers.Conv2D(45, 1, activation="softmax"),
     ])
 
-def make_dataset(path, batch_size, shuffle=True, cache_dir=None):
+def make_dataset(path, batch_size,dataset_size, shuffle=True, cache_dir=None,):
     def gen():
         
         reader_kwargs = {
@@ -82,7 +83,8 @@ def make_dataset(path, batch_size, shuffle=True, cache_dir=None):
     )
 
     if shuffle:
-        dataset = dataset.shuffle(2000) # this is important for ram usage because shuffle gonna fill up buffer size n images from s3 to ram and send it to gpu with randomness
+        buffer_size = min(2000, dataset_size)
+        dataset = dataset.shuffle(buffer_size) # this is important for ram usage because shuffle gonna fill up buffer size n images from s3 to ram and send it to gpu with randomness
 
     options = tf.data.Options()
     options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA # tell tf to shard data across gpus no matter what the source is , shard from beginning
@@ -110,6 +112,7 @@ def get_dataset_size(path, profiler):
     except Exception as e:
         profiler.log(f"Metadata error: {e}")
         return None, None, None
+
 
 def verify_s3_paths(base_path):
     if base_path.startswith(("s3://", "s3a://")):
@@ -168,9 +171,9 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001, p_name="train", a
             profile_path = normalize_path(os.path.join(data_path, "profile", "conversion_profile.json"))
 
             t_samples, v_samples, te_samples = get_dataset_size(profile_path, profiler)
-            steps_per_epoch = (t_samples // global_batch) if t_samples else 30
-            val_steps = (v_samples // global_batch) if v_samples else 10
-            test_steps = (te_samples // global_batch) if te_samples else 10
+            steps_per_epoch = math.ceil(t_samples / global_batch) if t_samples else 30
+            val_steps = math.ceil(v_samples / global_batch) if v_samples else 10
+            test_steps = math.ceil(te_samples / global_batch) if te_samples else 10
             samples_per_epoch = steps_per_epoch * global_batch
             profiler.record("train_samples", t_samples)
             profiler.record("validation_samples", v_samples)
@@ -183,15 +186,15 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001, p_name="train", a
             with profiler.step("load_datasets"):
                 with profiler.step("load_train"):
                     train_ds = strategy.experimental_distribute_dataset(
-                        make_dataset(train_path, global_batch, True, cache_dir=train_cache)
+                        make_dataset(train_path, global_batch, t_samples, True, cache_dir=train_cache)
                     )
                 with profiler.step("load_validation"):
                     val_ds = strategy.experimental_distribute_dataset(
-                        make_dataset(val_path, global_batch, False, cache_dir=val_cache)
+                        make_dataset(val_path, global_batch, v_samples, False, cache_dir=val_cache)
                     )
                 with profiler.step("load_test"):
                     test_ds = strategy.experimental_distribute_dataset(
-                        make_dataset(test_path, global_batch, False, cache_dir=test_cache)
+                        make_dataset(test_path, global_batch,te_samples, False, cache_dir=test_cache)
                     )
 
 

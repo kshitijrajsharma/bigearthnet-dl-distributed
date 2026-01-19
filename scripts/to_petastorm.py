@@ -156,6 +156,9 @@ def convert_to_petastorm(
     try:
         # Step 4: Process each data split (train/validation/test)
         for split_name, split_df in datasets.items():
+
+            print(f"Preparing {split_name} split...")
+
             if split_df.empty:
                 continue
 
@@ -190,8 +193,9 @@ def convert_to_petastorm(
                             .filter(lambda x: x is not None)
                         )
                         # repartition
-                        num_partitions = min(max(50, len(split_df) // 100), 1000)
-                        profiler.record("num_partitions", num_partitions)
+                        num_partitions = min(max(30, len(split_df) // 100), 1000)
+
+                        profiler.record(f"{split_name}_num_partitions", num_partitions)
 
                         rows_df = spark.createDataFrame(
                             rows_rdd, InputSchema.as_spark_schema()

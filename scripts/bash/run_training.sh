@@ -8,8 +8,6 @@
 ROOT_DIR="s3://ubs-homes/erasmus/raj/dlproject/experiments"
 EXPERIMENT_NAME="${1:-experiment_1}"
 
-# DATA_BASE="${ROOT_DIR}/${EXPERIMENT_NAME}/petastorm"
-
 
 DATA_BASE="${ROOT_DIR}/petastorm"
 

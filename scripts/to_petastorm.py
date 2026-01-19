@@ -87,17 +87,24 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
 
     # Init Spark
     with profiler.step("spark_init"):
-        spark = (SparkSession.builder
-            .appName("petastorm_gen")
-            .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-            .config("spark.hadoop.fs.s3a.aws.credentials.provider", "com.amazonaws.auth.DefaultAWSCredentialsProviderChain")
+
+        spark = (
+            SparkSession.builder.appName("petastorm_bigearthnet")
+            .config(
+                "spark.hadoop.fs.s3a.aws.credentials.provider",
+                "com.amazonaws.auth.DefaultAWSCredentialsProviderChain",
+            )
+            .config(
+                "spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem"
+            )
             .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.1")
-            .config("spark.sql.execution.arrow.pyspark.enabled", "true")
             .config("spark.executor.memory", args.executor_mem)
             .config("spark.driver.memory", args.driver_mem)
             .config("spark.executor.instances", args.n_executor)
             .config("spark.executor.cores", args.core)
-            .getOrCreate())
+            .getOrCreate()
+        )
+
 
     sc = spark.sparkContext
     schema = Unischema("InputSchema", [

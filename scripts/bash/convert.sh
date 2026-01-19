@@ -4,18 +4,18 @@
 # Creates folder structure: s3://.../experiments/experiment_1/petastorm/frac_0.01
 
 METADATA_PATH="s3a://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet"
-ROOT_DIR="s3://ubs-homes/erasmus/raj/dlproject/experiments"
+ROOT_DIR="s3a://ubs-homes/erasmus/raj/dlproject/experiments"
 EXPERIMENT_NAME="${1:-experiment_1}"
 DEPLOY_MODE="${2:-cluster}"
 
 OUTPUT_BASE="${ROOT_DIR}/${EXPERIMENT_NAME}/petastorm"
 
 # Spark configuration
-EXECUTOR_MEM="8g"
+EXECUTOR_MEM="16g"
 DRIVER_MEM="8g"
 CORES="4"
 N_EXECUTORS="8"
-TARGET_FILE_MB="50" 
+TARGET_FILE_MB="20" 
 
 FRACTIONS=(0.01 0.03 0.05 0.10)
 

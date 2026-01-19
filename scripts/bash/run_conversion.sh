@@ -12,7 +12,7 @@ DEPLOY_MODE="${2:-cluster}"
 OUTPUT_BASE="${ROOT_DIR}/${EXPERIMENT_NAME}/petastorm"
 
 # Spark configuration
-EXECUTOR_MEM="8g"
+EXECUTOR_MEM="16g"
 DRIVER_MEM="8g"
 CORES="4"
 N_EXECUTORS="8"

@@ -93,26 +93,25 @@ def build_unet_model():
 #     return dataset
 
 
-def make_dataset(path, epochs, batch_size, shuffle=True):
+def make_dataset(
+    path, epochs, batch_size, shuffle=True, cur_shard=None, shard_count=None
+):
     """Create TensorFlow dataset from Petastorm data"""
+    from petastorm.tf_utils import make_petastorm_dataset
 
-    def gen():
-        with make_reader(
-            path,
-            num_epochs=epochs,
-            hdfs_driver="libhdfs3",
-            reader_pool_type="thread",
-            workers_count=4,
-        ) as reader:
-            for sample in reader:
-                yield sample.image, sample.label
+    with make_reader(
+        path,
+        num_epochs=epochs,
+        hdfs_driver="libhdfs3",
+        reader_pool_type="thread",
+        workers_count=4,
+        cur_shard=cur_shard,
+        shard_count=shard_count,
+    ) as reader:
+        dataset = make_petastorm_dataset(reader)
 
-    dataset = tf.data.Dataset.from_generator(
-        gen,
-        output_signature=(
-            tf.TensorSpec(shape=(120, 120, 6), dtype=tf.float32),
-            tf.TensorSpec(shape=(120, 120), dtype=tf.uint8),
-        ),
+    dataset = dataset.map(
+        lambda x: (x.image, x.label), num_parallel_calls=tf.data.AUTOTUNE
     )
 
     if shuffle:
@@ -227,18 +226,43 @@ def train_model(
     profiler.record("test_samples", test_samples)
     profiler.record("steps_per_epoch", steps_per_epoch)
 
+    num_shards = strategy.num_replicas_in_sync
+    profiler.record("num_shards", num_shards)
+
+    print(f"Creating datasets with {num_shards} shards...")
+
+    def make_dataset_fn(input_context, path, epochs, batch_size, shuffle):
+        return make_dataset(
+            path,
+            epochs,
+            batch_size,
+            shuffle,
+            cur_shard=input_context.input_pipeline_id,
+            shard_count=input_context.num_input_pipelines,
+        )
+
     # Step 5: Load and prepare datasets
     with profiler.step("load_datasets"):
-        train_ds = make_dataset(train_path, epochs, batch_size, shuffle=True)
-        val_ds = make_dataset(val_path, epochs, batch_size, shuffle=False)
-        test_ds = make_dataset(test_path, epochs, batch_size, shuffle=False)
+        # train_ds = make_dataset(train_path, epochs, batch_size, shuffle=True)
+        # val_ds = make_dataset(val_path, epochs, batch_size, shuffle=False)
+        # test_ds = make_dataset(test_path, epochs, batch_size, shuffle=False)
 
-        # Distribute datasets across devices
-        train_ds = strategy.experimental_distribute_dataset(
-            train_ds
-        )  # this should handle the shards of dataset automatically
-        val_ds = strategy.experimental_distribute_dataset(val_ds)
-        test_ds = strategy.experimental_distribute_dataset(test_ds)
+        # # Distribute datasets across devices
+        # train_ds = strategy.experimental_distribute_dataset(
+        #     train_ds
+        # )  # this should handle the shards of dataset automatically
+        # val_ds = strategy.experimental_distribute_dataset(val_ds)
+        # test_ds = strategy.experimental_distribute_dataset(test_ds)
+
+        train_ds = strategy.distribute_datasets_from_function(
+            lambda ctx: make_dataset_fn(ctx, train_path, epochs, batch_size, True)
+        )
+        val_ds = strategy.distribute_datasets_from_function(
+            lambda ctx: make_dataset_fn(ctx, val_path, epochs, batch_size, False)
+        )
+        test_ds = strategy.distribute_datasets_from_function(
+            lambda ctx: make_dataset_fn(ctx, test_path, epochs, batch_size, False)
+        )
 
     # Step 6: Build and compile model
     with profiler.step("build_model"):

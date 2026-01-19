@@ -252,7 +252,7 @@ def convert_to_petastorm(
                 os.makedirs(split_path, exist_ok=True)
 
             # Write Petastorm dataset using Spark
-            with profiler.step(f"write_{split_name}_parquet"):
+            with profiler.step(f"process_{split_name}_parquet"):
                 with materialize_dataset(spark, split_path, InputSchema, target_file_mb):
                     rows_data = split_df.to_dict("records")
                     
@@ -261,7 +261,8 @@ def convert_to_petastorm(
                     )
                     
                     rows_df = spark.createDataFrame(rows_rdd, InputSchema.as_spark_schema())
-                    rows_df.write.mode("overwrite").parquet(split_path)
+                    with profiler.step(f"write_{split_name}_parquet"):
+                        rows_df.write.mode("overwrite").parquet(split_path)
 
             output_paths[split_name] = split_path
             profiler.log(f"{split_name} dataset saved:  {split_path}")

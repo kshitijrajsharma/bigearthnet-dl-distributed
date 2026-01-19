@@ -190,7 +190,7 @@ def convert_to_petastorm(
                             .filter(lambda x: x is not None)
                         )
                         # repartition
-                        num_partitions = min(max(50, len(split_df) // 1000), 400)
+                        num_partitions = min(max(50, len(split_df) // 100), 400)
                         profiler.record("num_partitions", num_partitions)
 
                         rows_df = spark.createDataFrame(

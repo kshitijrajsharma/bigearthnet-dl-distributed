@@ -15,6 +15,7 @@ def log_gpu_info(profiler):
     """Log GPU detection details."""
     gpus = tf.config.list_physical_devices("GPU")
     profiler.log(f"GPUs detected: {len(gpus)}")
+    profiler.record("gpu_count", len(gpus))
     if gpus:
         for i, gpu in enumerate(gpus):
             try:
@@ -110,7 +111,11 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001, p_name="train", a
     with profiler.step("strategy_init"):
         strategy = tf.distribute.MirroredStrategy() # works for multiple gpus on single machine
         profiler.log(f"Number of gpu devices: {strategy.num_replicas_in_sync}")
+        profiler.record('strategy', strategy.__class__.__name__)
+        profiler.record('num_replicas_in_sync', strategy.num_replicas_in_sync)
         global_batch = batch_size * strategy.num_replicas_in_sync
+        profiler.record("batch_size_per_replica", batch_size)
+        profiler.record("global_batch_size", global_batch)
         profiler.log(f"Global batch: {global_batch} ({strategy.num_replicas_in_sync} replicas)")
 
     with profiler.step("dataset_metadata"):
@@ -124,6 +129,11 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001, p_name="train", a
         val_steps = (v_samples // global_batch) if v_samples else 10
         test_steps = (te_samples // global_batch) if te_samples else 10
         samples_per_epoch = steps_per_epoch * global_batch
+        profiler.record("train_samples", t_samples)
+        profiler.record("validation_samples", v_samples)
+        profiler.record("test_samples", te_samples)
+        profiler.record("steps_per_epoch", steps_per_epoch)
+        profiler.record("samples_per_epoch", samples_per_epoch)
         profiler.log(f"samples/epoch: {samples_per_epoch}")
         profiler.log(f"steps/epoch: {steps_per_epoch}")
 
@@ -162,6 +172,8 @@ def train_model(data_path, epochs=10, batch_size=32, lr=0.001, p_name="train", a
     with profiler.step("evaluation"):
         test_loss, test_acc = model.evaluate(test_ds, steps=test_steps)
         profiler.log(f"Test Loss: {test_loss:.4f}, Acc: {test_acc:.4f}")
+        profiler.record("test_loss", test_loss)
+        profiler.record("test_accuracy", test_acc)
 
     profiler.save(data_path, name=p_name)
     return model, history

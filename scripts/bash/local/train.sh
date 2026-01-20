@@ -2,11 +2,16 @@
 
 # BigEarthNet Training Script
 
-ROOT_DIR="s3://ubs-homes/erasmus/raj/dlproject/experiments"
+# ROOT_DIR="s3://ubs-homes/erasmus/raj/dlproject/experiments"
+
+
+
 EXPERIMENT_NAME="${1:-local_experiment}"
 TRAIN_PROFILE_NAME="${2:-train_local}"
 
-DATA_BASE="${ROOT_DIR}/${EXPERIMENT_NAME}/petastorm"
+# DATA_BASE="${ROOT_DIR}/${EXPERIMENT_NAME}/petastorm"
+
+DATA_BASE = "petastorm_data"
 
 EPOCHS="10"
 BATCH_SIZE="16"

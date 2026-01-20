@@ -320,7 +320,7 @@ def main():
     parser.add_argument("--p_name", default="train")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch", type=int, default=16)
-    parser.add_argument("--no_of_gpus", type=int, default=None)
+    parser.add_argument("--gpus", type=int, default=None)
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument(
         "--enable-cache",
@@ -336,7 +336,7 @@ def main():
         args.p_name,
         str(args),
         args.enable_cache,
-        args.no_of_gpus,
+        args.gpus,
     )
 
 

@@ -225,7 +225,7 @@ def main():
     parser.add_argument("--driver-mem", default="4g")
     parser.add_argument("--core", type=int, default=2)
     parser.add_argument("--n_executor", type=int, default=2)
-    parser.add_argument("--target-file-mb", type=int, default=20)
+    parser.add_argument("--target-file-mb", type=int, default=50)
     args = parser.parse_args()
 
     t0 = time.time()

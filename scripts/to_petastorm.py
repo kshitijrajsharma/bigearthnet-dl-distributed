@@ -159,8 +159,25 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
             .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.1")
             .config("spark.executor.memory", args.executor_mem)
             .config("spark.driver.memory", args.driver_mem)
-            .config("spark.executor.instances", args.n_executor)
             .config("spark.executor.cores", args.core)
+            .config("spark.driver.maxResultSize", "512m")
+            .config("spark.executor.instances", str(args.n_executor))
+            .config(
+                "spark.serializer", "org.apache.spark.serializer.KryoSerializer"
+            )  # memory efficient serializer source : https://www.javaspring.net/blog/java-lang-outofmemoryerror-java-heap-space-spark/
+            .config(
+                "spark.sql.shuffle.partitions",
+                str((args.core * args.n_executor) * 4),
+            )  # rule of thumb : 2-4 partitions per core
+            .config(
+                "spark.sql.files.maxPartitionBytes", "268435456"
+            )  # 256MB # intiial partition size
+            .config(
+                "spark.sql.adaptive.enabled", "true"
+            )  # let spark optimize the shuffle partitions
+            .config(
+                "spark.sql.adaptive.advisoryPartitionSizeInBytes", "134217728"
+            )  # 128MB # source : https://spark.apache.org/docs/latest/sql-performance-tuning.html
             .getOrCreate()
         )
 
@@ -179,8 +196,9 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
                 continue
 
             # calculate partitions , we need to control the size of the output files , initially we did by controlling the parition numbers but if we can approx estimate filesize why not do it by file size ?
-            bytes_per_row = (120 * 120 * 6 * 4 ) + (
-                120 * 120 # * 4 is back again because image is float 32 and label is uint8 , so 8*4 , 
+            bytes_per_row = (120 * 120 * 6 * 4) + (
+                120
+                * 120  # * 4 is back again because image is float 32 and label is uint8 , so 8*4 ,
             )  # it is coming from above schema , 6 image bands with 120/120 image size and labels is basically 120/120
             rows_per_file = int(
                 (args.target_file_mb * 1024**2) / (bytes_per_row * 0.4)

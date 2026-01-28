@@ -40,7 +40,6 @@ def log_gpu_info(profiler):
     return len(gpus)
 
 
-
 def build_model():
     inputs = tf.keras.layers.Input(shape=(120, 120, 6))
     x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same")(inputs)
@@ -58,37 +57,22 @@ def build_model():
     x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same")(x)
     outputs = tf.keras.layers.Conv2D(45, 1, activation="softmax")(x)
     return tf.keras.Model(inputs, outputs)
-    
+
+
 def make_dataset(
     path,
     batch_size,
     dataset_size,
     shuffle=True,
-    cache_dir=None,
 ):
-    def gen():
 
+    def gen():
         reader_kwargs = {
             "dataset_url": path,
-            "num_epochs": None,  # we are controlling from tf side
-            "reader_pool_type": "thread",  # threads is throwing me pygilstate release bug , TODO : if it is also throwing bug on cluster consider switching to process
+            "num_epochs": None,
+            "reader_pool_type": "thread",
             "workers_count": min(multiprocessing.cpu_count(), 8),
         }
-        if (
-            cache_dir
-        ):  # i am placing this as optional incase in server s3 reading works fine and no need to cache on local disk
-            reader_kwargs.update(
-                {
-                    "cache_type": "local-disk",
-                    "cache_location": cache_dir,
-                    "cache_size_limit": 10
-                    * 1024
-                    * 1024
-                    * 1024,  # 10GB limit , TODO : if efs has space restriction , get rid of this
-                    "cache_row_size_estimate": 1024 * 1024,  # ~1MB per row
-                }
-            )
-
         with make_reader(**reader_kwargs) as reader:
             for sample in reader:
                 yield sample.image, sample.label
@@ -157,38 +141,13 @@ def train_model(
     lr=0.001,
     p_name="train",
     args_str="",
-    enable_cache=False,
     no_of_gpus=None,
+    enable_lr_scaling=False,
 ):
     profiler = Profiler()
     profiler.log(f"Args: {args_str}")
     profiler.record("no_gpus_input", no_of_gpus)
 
-    base_cache_dir = None
-    train_cache = None
-    val_cache = None
-    test_cache = None
-    profiler.record("cache_enabled", enable_cache)
-
-    if (
-        enable_cache
-    ):  # in local, it needs to download the image from s3 and store it somewhere so that petastorm reader can read from local disk instead of going to s3 every time
-        base_cache_dir = os.path.join(
-            os.getcwd(), "tmp", "petastorm_cache"
-        )  # Usually placing this in system level /tmp is safe because each time device restarts its gonna cleanup tmp but here i am placing in working dir as i have suscpicion that efs permission we have we can write in our home dir only
-        train_cache = os.path.join(base_cache_dir, "train")
-        val_cache = os.path.join(base_cache_dir, "val")
-        test_cache = os.path.join(base_cache_dir, "test")
-
-        if os.path.exists(base_cache_dir):
-            shutil.rmtree(base_cache_dir)
-        os.makedirs(base_cache_dir, exist_ok=True)
-
-        os.makedirs(train_cache, exist_ok=True)
-        os.makedirs(val_cache, exist_ok=True)
-        os.makedirs(test_cache, exist_ok=True)
-        profiler.record("petastorm_cache_dir", base_cache_dir)
-        profiler.log(f"Petastorm local disk cache enabled at {base_cache_dir}")
     try:
         with profiler.step("gpu_setup"):
             log_gpu_info(profiler)
@@ -198,11 +157,10 @@ def train_model(
 
         with profiler.step("strategy_init"):
             if no_of_gpus is not None:
-            
-                lr = lr * no_of_gpus
-                profiler.log(f"Adjusted learning rate: {lr}")
+                if enable_lr_scaling:
+                    lr = lr * no_of_gpus
+                    profiler.log(f"Adjusted learning rate: {lr}")
                 profiler.record("learning_rate", lr)
-                
                 devices = [f"GPU:{i}" for i in range(no_of_gpus)]
                 strategy = tf.distribute.MirroredStrategy(devices=devices)
             else:
@@ -248,7 +206,6 @@ def train_model(
                             global_batch,
                             t_samples,
                             True,
-                            cache_dir=train_cache,
                         )
                     )
                 with profiler.step("load_validation"):
@@ -258,7 +215,6 @@ def train_model(
                             global_batch,
                             v_samples,
                             False,
-                            cache_dir=val_cache,
                         )
                     )
                 with profiler.step("load_test"):
@@ -268,7 +224,6 @@ def train_model(
                             global_batch,
                             te_samples,
                             False,
-                            cache_dir=test_cache,
                         )
                     )
 
@@ -307,12 +262,7 @@ def train_model(
         profiler.save(data_path, name=p_name)
         return model, history
     finally:
-        if enable_cache and base_cache_dir and os.path.exists(base_cache_dir):
-            try:
-                shutil.rmtree(base_cache_dir)
-                profiler.log(f"Cleaned up cache at {base_cache_dir}")
-            except Exception as e:
-                profiler.log(f"Warning: Failed to cleanup cache {base_cache_dir}: {e}")
+        pass
 
 
 def main():
@@ -325,11 +275,7 @@ def main():
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--gpus", type=int, default=None)
     parser.add_argument("--lr", type=float, default=0.001)
-    parser.add_argument(
-        "--enable-cache",
-        action="store_true",
-        help="Enable local disk caching for Petastorm readers",
-    )
+    parser.add_argument("--enable_lr_scaling", default=False, action="store_true")
     args = parser.parse_args()
     train_model(
         args.data,
@@ -338,8 +284,8 @@ def main():
         args.lr,
         args.p_name,
         str(args),
-        args.enable_cache,
         args.gpus,
+        args.enable_lr_scaling,
     )
 
 

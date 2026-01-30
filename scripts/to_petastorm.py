@@ -429,32 +429,18 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
             if split_df.empty:
                 continue
 
-            rows_per_file = int(
-                (args.target_file_mb * 1024**2) / (bytes_per_row * 0.4)
-            )  # Assume 0.4 compression ratio for Parquet (typical for numeric data)
-            output_partitions = max(1, len(split_df) // rows_per_file)
-
             # internal spark partitions: based on data size with target_file_mb as partition size
             total_data_bytes = len(split_df) * bytes_per_row
-            target_partition_bytes = args.target_file_mb * 1024**2
             profiler.record(f"{name}_total_data_size_gb", total_data_bytes / (1024**3))
-            data_based_partitions = max(
-                1, int(total_data_bytes / target_partition_bytes)
-            )
-            min_partitions = (
-                args.core * args.n_executor * 2
-            )  # Ensure at least 2 partitions per core for efficient parallelism
-            spark_partitions = min_partitions
-            # spark_partitions = min(
-            #     data_based_partitions, min_partitions
-            # )  # Use the larger value to ensure both data distribution and parallelism
 
-            # spark_partitions = spark_partitions
+            spark_partitions = min(
+                len(split_df), args.core * args.n_executor * 4
+            )  # Ensure at least 2 partitions per core for efficient parallelism
 
             profiler.log(
-                f"Processing {name}: {len(split_df)} rows, {spark_partitions} spark partitions, {output_partitions} output partitions"
+                f"Processing {name}: {len(split_df)} rows, {spark_partitions} spark partitions"
             )
-            profiler.record(f"{name}_data_based_partitions", data_based_partitions)
+
             out_path = os.path.join(output_dir, name)
 
             with profiler.step(f"write_{name}"):
@@ -462,21 +448,15 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
                     rdd = sc.parallelize(split_df.to_dict("records"), spark_partitions)
                     rdd = rdd.mapPartitions(lambda x: process_partition(x, schema))
 
+                    profiler.record(f"{name}_rdd_partitions", rdd.getNumPartitions())
+
                     df_spark = spark.createDataFrame(rdd, schema.as_spark_schema())
-                    # df_spark.repartition(output_partitions)
-                    # df_spark = (
-                    #     df_spark.coalesce(output_partitions)
-                    #     if output_partitions < spark_partitions
-                    #     else df_spark.repartition(output_partitions)
-                    # )
                     df_spark.write.mode("overwrite").parquet(out_path)
 
             profiler.log(f"Saved {name} to {out_path}")
             profiler.record(f"{name}_samples", len(split_df))
             tasks_per_executor = max(1, spark_partitions // args.n_executor)
             profiler.record(f"{name}_tasks_per_executor", tasks_per_executor)
-            profiler.record(f"{name}_spark_partitions", spark_partitions)
-            profiler.record(f"{name}_output_partitions", output_partitions)
 
     finally:
         spark.stop()

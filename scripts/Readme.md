@@ -53,14 +53,17 @@ Parameters:
 
 **Option A: Using Bash Scripts (Recommended)**
 
-Run complete conversion pipeline for multiple data percentages:
+Run complete conversion pipeline for multiple data fractions and executor counts:
 
 ```bash
 # Convert data to Petastorm format
-./scripts/bash/run_conversion.sh experiment_1
+# Usage: ./scripts/bash/convert.sh <experiment_name> <deploy_mode>
+./scripts/bash/convert.sh experiment_1 client
 
-# Train models on converted data
-./scripts/bash/run_training.sh experiment_1
+# Train models on converted data with multiple GPU configurations
+# Usage: ./scripts/bash/train.sh <experiment_name> <profile_name> <executor_count>
+# Note: executor_count should match one used in conversion (default: 8)
+./scripts/bash/train.sh experiment_1 train 8
 ```
 
 The conversion script creates this structure:
@@ -68,52 +71,64 @@ The conversion script creates this structure:
 s3://ubs-homes/erasmus/raj/dlproject/experiments/
 └── experiment_1/
     └── petastorm/
-        ├── 1percent/
-        │   ├── train/
-        │   ├── validation/
-        │   ├── test/
-        │   └── profile/
-        │       ├── conversion_profile.json
-        │       └── conversion_profile.log
-        ├── 3percent/
-        ├── 5percent/
-        ├── 7percent/
-        └── 10percent/
+        ├── frac_0.01/
+        │   ├── exec_8/
+        │   │   ├── train/
+        │   │   ├── validation/
+        │   │   ├── test/
+        │   │   └── profile/
+        │   │       ├── conversion_profile.json
+        │   │       └── conversion_profile.log
+        │   ├── exec_5/
+        │   ├── exec_2/
+        │   └── exec_1/
+        ├── frac_0.05/
+        ├── frac_0.10/
+        └── frac_0.20/
 ```
 
-Training adds profile data to each percentage folder:
+Training adds profile data to each fraction/executor folder:
 ```
-petastorm/1percent/profile/
+petastorm/frac_0.01/exec_8/profile/
 ├── conversion_profile.json
 ├── conversion_profile.log
-├── train_profile.json
-└── train_profile.log
+├── train_gpu4_profile.json
+├── train_gpu4_profile.log
+├── train_gpu3_profile.json
+├── train_gpu3_profile.log
+├── train_gpu2_profile.json
+├── train_gpu2_profile.log
+├── train_gpu1_profile.json
+└── train_gpu1_profile.log
 ```
 
 Configuration:
 
 To modify script parameters, edit the configuration values directly in the bash scripts:
 
-**run_conversion.sh:**
+**convert.sh:**
 ```bash
-EXECUTOR_MEM="8g"        # Spark executor memory
-DRIVER_MEM="4g"          # Spark driver memory
-CORES="4"                # Cores per executor
-N_EXECUTORS="3"          # Number of executors
-SPARK_PACKAGES="ch.cern.sparkmeasure:spark-measure_2.12:0.27"
+EXECUTOR_MEM="16g"       # Spark executor memory
+DRIVER_MEM="8g"          # Spark driver memory
+CORES="3"                # Cores per executor
+TARGET_FILE_MB="50"      # Target output file size in MB
+N_EXECUTORS=(8 5 2 1)    # Array of executor counts to test
+FRACTIONS=(0.01 0.05 0.10 0.20)  # Array of data fractions to process
 ```
 
-**run_training.sh:**
+**train.sh:**
 ```bash
 EPOCHS="10"              # Training epochs
 BATCH_SIZE="16"          # Batch size per replica
 LEARNING_RATE="0.001"    # Learning rate
+FRACTIONS=(0.01 0.05 0.10 0.20)  # Array of data fractions to train on
+GPUS=(4 3 2 1)           # Array of GPU counts to test
 ```
 
 Then run:
 ```bash
-./scripts/bash/run_conversion.sh experiment_1
-./scripts/bash/run_training.sh experiment_1
+./scripts/bash/convert.sh experiment_1 client
+./scripts/bash/train.sh experiment_1 train 8
 ```
 
 **Option B: Manual Single Run**
@@ -169,10 +184,12 @@ uv run train-model \
 --meta         Metadata parquet path
 --out          Output directory for Petastorm dataset
 --frac         Data fraction to process, 0.0-1.0 (default: 0.001)
+--p_name       Profile output name (default: "conversion")
 --executor-mem Spark executor memory (default: 4g)
 --driver-mem   Spark driver memory (default: 4g)
 --core         Executor cores (default: 2)
 --n_executor   Number of executors (default: 2)
+--target-file-mb  Target output file size in MB (default: 50)
 ```
 
 ### train.py
@@ -182,6 +199,9 @@ uv run train-model \
 --epochs  Number of training epochs (default: 5)
 --batch   Batch size per replica (default: 16)
 --lr      Learning rate (default: 0.001)
+--p_name  Profile output name (default: "train")
+--gpus    Number of GPUs to use (default: auto-detect all available)
+--enable_lr_scaling  Scale learning rate by number of GPUs (flag, default: False)
 ```
 
 
@@ -245,8 +265,8 @@ Or use the automated scripts:
 
 ```bash
 # Convert multiple percentages
-./scripts/bash/run_conversion.sh experiment_1
+./scripts/bash/convert.sh experiment_1 client
 
 # Train on all converted data
-./scripts/bash/run_training.sh experiment_1
+./scripts/bash/train.sh experiment_1 train
 ```

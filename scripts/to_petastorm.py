@@ -1,3 +1,18 @@
+"""Convert BigEarthNet TIF files to Petastorm format for distributed deep learning.
+
+This script orchestrates the complete data pipeline:
+1. Reads metadata with S3 paths for Sentinel-1, Sentinel-2, and reference maps
+2. Splits data into train/validation/test sets (maintaining existing splits)
+3. Uses Apache Spark to parallelize TIF reading and processing from S3
+4. Writes output in Petastorm format for efficient GPU training
+
+Key design decisions:
+- Uses bulk S3 reads (fs.cat) to fetch multiple files in parallel per partition
+- Normalizes label classes using LABEL_MAPPING for consistent model training
+- Configures Spark partitioning based on data size and executor resources
+- Generates detailed performance profiles for conversion analysis
+"""
+
 import argparse
 import json
 import os
@@ -19,6 +34,11 @@ from rasterio.io import MemoryFile
 
 
 def get_host_info():
+    """Collect system information for profiling.
+
+    Captures hardware configuration to understand performance characteristics
+    and resource constraints during conversion.
+    """
     info = {
         "hostname": platform.node(),
         "platform": platform.system(),
@@ -26,7 +46,7 @@ def get_host_info():
         "ram_gb": round(psutil.virtual_memory().total / (1024**3), 2),
     }
     try:
-        import tensorflow as tf  # tf might not be available in spart so had to be inside try
+        import tensorflow as tf  # TensorFlow might not be available in Spark workers, so check conditionally
 
         gpus = tf.config.list_physical_devices("GPU")
         if gpus:
@@ -40,6 +60,10 @@ def get_host_info():
 
 
 def get_usage():
+    """Capture current resource utilization for profiling.
+
+    Monitors CPU, RAM, and GPU usage to identify bottlenecks during conversion.
+    """
     usage = {
         "cpu_percent": psutil.cpu_percent(),
         "ram_percent": psutil.virtual_memory().percent,
@@ -200,6 +224,8 @@ class Profiler:
 
 warnings.filterwarnings("ignore")
 
+# BigEarthNet uses specific CORINE Land Cover class IDs (not sequential 0-44)
+# We map them to sequential indices for efficient one-hot encoding in the model
 BIGEARTH_IDS = [
     111,
     112,
@@ -247,23 +273,28 @@ BIGEARTH_IDS = [
     523,
     999,
 ]
+# Create lookup table: CORINE class ID -> model class index (0-44)
 LABEL_MAPPING = np.zeros(1000, dtype=np.uint8)
 for idx, class_id in enumerate(BIGEARTH_IDS):
     LABEL_MAPPING[class_id] = idx
 
 
 def process_partition(rows, schema):
-    """Process partition with optimized bulk S3 reads."""
-    # region_name ; as it was failing in my local  for some reason
+    """Process partition with optimized bulk S3 reads.
+
+    Why bulk reads: Fetching files one-by-one from S3 is slow due to latency.
+    The s3fs.cat() API fetches multiple files in parallel, dramatically reducing
+    total I/O time when processing thousands of satellite image patches.
+    """
+    # region_name specified because default region may fail for some AWS accounts
     fs = s3fs.S3FileSystem(anon=False, client_kwargs={"region_name": "eu-west-1"})
 
     for row in rows:
         try:
 
             def clean(p):
-                return p.replace("s3a://", "").replace(
-                    "s3://", ""
-                )  # s3fs doesn't support s3a
+                # s3fs library doesn't support s3a:// protocol, only s3://
+                return p.replace("s3a://", "").replace("s3://", "")
 
             # 1. Map logical names to S3 paths
             s2_bands = ["B02", "B03", "B04", "B08"]
@@ -280,10 +311,9 @@ def process_partition(rows, schema):
                 )
 
             # 2. Bulk fetch all files in parallel
-            # fs.cat returns a dict {path: bytes} which is
-            raw_files = fs.cat(
-                list(path_map.values())
-            )  # fs has this cool api that can fetch multiple files in parallel https://s3fs.readthedocs.io/en/latest/api.html#s3fs.core.S3FileSystem.cat
+            # fs.cat() fetches multiple S3 objects concurrently, significantly faster
+            # than sequential reads. Returns dict {path: bytes}
+            raw_files = fs.cat(list(path_map.values()))
 
             # 3. load results bytes to numpy in memory
             results = {}
@@ -297,7 +327,8 @@ def process_partition(rows, schema):
             s2 = np.stack([results[f"s2_{b}"] for b in s2_bands], axis=-1)
 
             image = np.concatenate([s1, s2], axis=-1).astype(np.float32)
-            # 5. Map labels, well as we are reading labels anyway so why not optimize all the way and normalize the label classes
+            # 5. Map CORINE labels to sequential indices for efficient model training
+            # This normalization reduces memory and enables direct indexing
             label = LABEL_MAPPING[results["label"]].astype(np.uint8)
 
             yield dict_to_spark_row(schema, {"image": image, "label": label})
@@ -307,6 +338,16 @@ def process_partition(rows, schema):
 
 
 def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
+    """Convert BigEarthNet TIF files to Petastorm format using Apache Spark.
+
+    Why Petastorm: Provides efficient data loading for TensorFlow/PyTorch with:
+    - Columnar Parquet storage for fast I/O
+    - Schema validation and type safety
+    - Native integration with distributed training
+
+    Why Spark: Enables parallel processing of 500k+ satellite images by distributing
+    work across multiple executors, significantly reducing conversion time.
+    """
     profiler = Profiler()
     profiler.log(
         f"Starting conversion with fraction {fraction}, {args.n_executor} exec"
@@ -323,6 +364,7 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
     for split in ["train", "validation", "test"]:
         sub_df = df[df["split"] == split]
         if fraction < 1.0:
+            # Random sampling within each split to maintain distribution
             sub_df = sub_df.sample(frac=fraction, random_state=42)
         splits[split] = sub_df.reset_index(drop=True)
         profiler.record(f"{split}_samples", len(sub_df))
@@ -347,20 +389,20 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
             .config("spark.executor.instances", str(args.n_executor))
             .config(
                 "spark.serializer", "org.apache.spark.serializer.KryoSerializer"
-            )  # memory efficient serializer source : https://www.javaspring.net/blog/java-lang-outofmemoryerror-java-heap-space-spark/
+            )  # Kryo is more memory-efficient than Java serializer for binary data
             .config(
                 "spark.sql.shuffle.partitions",
                 str((args.core * args.n_executor) * 4),
-            )  # rule of thumb : 2-4 partitions per core
+            )  # Rule of thumb: 2-4 partitions per core for optimal parallelism
             .config(
                 "spark.sql.files.maxPartitionBytes", str(134217728)
-            )  # 128MB # max partition size
+            )  # 128MB max partition size to prevent memory issues
             .config(
                 "spark.sql.adaptive.enabled", "true"
-            )  # let spark optimize the shuffle partitions
+            )  # Let Spark optimize shuffle partitions dynamically based on data size
             .config(
                 "spark.sql.adaptive.advisoryPartitionSizeInBytes", str(134217728 / 2)
-            )  # 64MB # source : https://spark.apache.org/docs/latest/sql-performance-tuning.html
+            )  # 64MB target partition size for adaptive optimization
             .getOrCreate()
         )
 
@@ -378,7 +420,7 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
         total_rows = sum(len(s) for s in splits.values())
         bytes_per_row = (120 * 120 * 6 * 4) + (
             120 * 120
-        )  # it is coming from above schema , 6 image bands with 120/120 image size and labels is basically 120/120, * 4 for float32
+        )  # Schema: 6 image bands (120x120, float32) + label (120x120, uint8)
         dataset_size_gb = round((total_rows * bytes_per_row) / (1024**3), 2)
         profiler.record("total_rows", total_rows)
         profiler.record("dataset_size_gb", dataset_size_gb)
@@ -389,7 +431,7 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
 
             rows_per_file = int(
                 (args.target_file_mb * 1024**2) / (bytes_per_row * 0.4)
-            )  # 0.4 compression factor
+            )  # Assume 0.4 compression ratio for Parquet (typical for numeric data)
             output_partitions = max(1, len(split_df) // rows_per_file)
 
             # internal spark partitions: based on data size with target_file_mb as partition size
@@ -401,10 +443,10 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
             )
             min_partitions = (
                 args.core * args.n_executor * 2
-            )  # at least 2 per core for parallelism
+            )  # Ensure at least 2 partitions per core for efficient parallelism
             spark_partitions = max(
                 data_based_partitions, min_partitions
-            )  # whichever is maximum
+            )  # Use the larger value to ensure both data distribution and parallelism
 
             profiler.log(
                 f"Processing {name}: {len(split_df)} rows, {spark_partitions} spark partitions, {output_partitions} output partitions"

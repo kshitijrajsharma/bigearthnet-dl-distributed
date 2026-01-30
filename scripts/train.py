@@ -1,4 +1,17 @@
-"""Train semantic segmentation model on BigEarthNet using Petastorm."""
+"""Train semantic segmentation model on BigEarthNet using Petastorm.
+
+This script trains a U-Net model for land cover classification using:
+- Petastorm for efficient S3 data streaming (no local disk needed)
+- TensorFlow with distributed training support (multi-GPU)
+- Early stopping to prevent overfitting
+- Comprehensive performance profiling
+
+Key design decisions:
+- Uses Petastorm's streaming API to handle datasets larger than memory
+- Configures TensorFlow's auto-sharding for multi-GPU data distribution
+- Implements prefetching to overlap data loading with GPU computation
+- Generates detailed profiles for training analysis and optimization
+"""
 
 import argparse
 import json
@@ -16,13 +29,18 @@ from scripts import Profiler
 tf.config.optimizer.set_jit(False)
 
 os.environ["PYTHONWARNINGS"] = (
-    "ignore::FutureWarning"  # we are using older version of petastorm & pyarrow , for god knows why , its in cluster so basically no option ! so i am supressing the warning for using depreceated APIs
+    "ignore::FutureWarning"  # Suppress warnings from older Petastorm/PyArrow versions  # Running on cluster with locked dependency versions, cannot upgrade
 )
 warnings.filterwarnings("ignore", category=FutureWarning, module="petastorm")
 warnings.filterwarnings("ignore", category=FutureWarning, module="pyarrow")
 
 
 def setup_gpu_memory_growth():
+    """Enable dynamic GPU memory allocation to prevent TensorFlow from hogging all VRAM.
+
+    Why needed: By default, TensorFlow allocates all available GPU memory upfront,
+    which prevents other processes from using the GPU. Dynamic growth allows sharing.
+    """
     gpus = tf.config.list_physical_devices("GPU")
     for gpu in gpus:
         try:
@@ -33,11 +51,19 @@ def setup_gpu_memory_growth():
 
 
 def record_metrics(profiler, **kwargs):
+    """Record multiple metrics to profiler in a single call.
+
+    Helper to avoid repetitive profiler.record() calls when logging many metrics.
+    """
     for k, v in kwargs.items():
         profiler.record(k, v)
 
 
 def log_gpu_info(profiler):
+    """Log GPU availability and device count to profiler.
+
+    Helps diagnose hardware configuration issues and verifies GPU detection.
+    """
     gpus = tf.config.list_physical_devices("GPU")
     profiler.log(f"GPUs detected: {len(gpus)}")
     profiler.record("gpu_count", len(gpus))
@@ -47,6 +73,19 @@ def log_gpu_info(profiler):
 
 
 def build_model():
+    """Build U-Net architecture for semantic segmentation.
+
+    Why U-Net: Encoder-decoder structure preserves spatial information while
+    learning hierarchical features, ideal for pixel-wise land cover classification.
+
+    Architecture:
+    - Input: 120x120x6 (S1 VV/VH + S2 B02/B03/B04/B08)
+    - Encoder: 2 conv blocks with max pooling (64->128->256 channels)
+    - Decoder: Upsampling with convolutions back to input resolution
+    - Output: 120x120x45 (45 land cover classes)
+
+    Residual connection at input helps preserve low-level spatial features.
+    """
     inputs = tf.keras.layers.Input(shape=(120, 120, 6))
     x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same")(inputs)
     x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same")(x)
@@ -67,6 +106,18 @@ def build_model():
 
 
 def make_dataset(path, batch_size, dataset_size, shuffle=True):
+    """Create TensorFlow dataset from Petastorm files.
+
+    Why Petastorm: Enables streaming large datasets from S3 without downloading
+    everything to local disk. Integrates with TensorFlow's data pipeline.
+
+    Args:
+        path: Petastorm dataset URL (can be s3:// or file://)
+        batch_size: Global batch size (across all GPUs)
+        dataset_size: Total number of samples (for shuffle buffer sizing)
+        shuffle: Whether to shuffle data (True for training, False for validation/test)
+    """
+
     def gen():
         reader_kwargs = {
             "dataset_url": path,
@@ -89,21 +140,25 @@ def make_dataset(path, batch_size, dataset_size, shuffle=True):
     if shuffle:
         dataset = dataset.shuffle(
             min(2000, dataset_size)
-        )  # this is important for ram usage because shuffle gonna fill up buffer size n images from s3 to ram and send it to gpu with randomness
+        )  # Limit buffer size to prevent excessive RAM usage (shuffle loads buffer_size images into RAM)
 
     options = tf.data.Options()
     options.experimental_distribute.auto_shard_policy = (
         tf.data.experimental.AutoShardPolicy.DATA
-    )  # tell tf to shard data across gpus no matter what the source is , shard from beginning
+    )  # Automatically shard data across GPUs from the start of the pipeline
     dataset = dataset.with_options(options)
     dataset = dataset.batch(batch_size, drop_remainder=True)
     dataset = dataset.prefetch(
         tf.data.AUTOTUNE
-    )  # let cpu prepare next batch while gpu is training on current batch , let tf figure it out by itself
+    )  # Let CPU prepare next batch while GPU trains on current batch (overlaps I/O with computation)
     return dataset
 
 
 def normalize_path(path):
+    """Normalize path to URL format required by Petastorm.
+
+    Petastorm requires file:// prefix for local paths. S3 paths are used as-is.
+    """
     return (
         f"file://{os.path.abspath(path)}"
         if not path.startswith(("s3://", "file://"))
@@ -112,6 +167,11 @@ def normalize_path(path):
 
 
 def get_dataset_size(path, profiler):
+    """Read dataset sizes from conversion profile metadata.
+
+    Why needed: We need exact sample counts to calculate steps_per_epoch for training.
+    Reading from profile avoids expensive directory listing on S3.
+    """
     try:
         profiler.log(f"Reading dataset profile from: {path}")
         is_s3 = path.startswith(("s3://", "s3a://"))
@@ -126,6 +186,11 @@ def get_dataset_size(path, profiler):
 
 
 def verify_s3_paths(base_path):
+    """Verify all required dataset splits exist before starting training.
+
+    Why fail early: Better to catch missing data immediately than wait for training
+    to start and fail after expensive GPU initialization.
+    """
     if base_path.startswith(("s3://", "s3a://")):
         s3 = s3fs.S3FileSystem()
         base = base_path.replace("s3://", "").replace("s3a://", "").rstrip("/")
@@ -159,6 +224,8 @@ def train_model(
         with profiler.step("strategy_init"):
             if no_of_gpus is not None:
                 if enable_lr_scaling:
+                    # Scale learning rate proportionally to batch size increase from multi-GPU training
+                    # Maintains effective learning rate when global batch size increases
                     lr = lr * no_of_gpus
                     profiler.log(f"Adjusted learning rate: {lr}")
                 profiler.record("learning_rate", lr)
@@ -168,7 +235,7 @@ def train_model(
             else:
                 strategy = (
                     tf.distribute.MirroredStrategy()
-                )  # works for multiple gpus on single machine
+                )  # Auto-detects all available GPUs on the machine
             profiler.log(f"Number of gpu devices: {strategy.num_replicas_in_sync}")
             global_batch = batch_size * strategy.num_replicas_in_sync
             profiler.log(

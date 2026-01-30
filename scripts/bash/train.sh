@@ -5,9 +5,9 @@
 ROOT_DIR="s3://ubs-homes/erasmus/raj/dlproject/experiments"
 EXPERIMENT_NAME="${1:-experiment_final}"
 TRAIN_PROFILE_NAME="${2:-train}"
-# NO_OF_GPUS="${3:-2}"
+EXECUTOR_COUNT="${3:-8}"  # Which executor count's data to train on
 
-DATA_BASE="${ROOT_DIR}/${EXPERIMENT_NAME}/exec_8/petastorm"
+DATA_BASE="${ROOT_DIR}/${EXPERIMENT_NAME}/petastorm"
 
 EPOCHS="10"
 BATCH_SIZE="16"
@@ -21,7 +21,7 @@ echo "Looking for data in: ${DATA_BASE}"
 
 for pct in "${FRACTIONS[@]}"; do
     for GPU in "${GPUS[@]}"; do
-        DATA_DIR="${DATA_BASE}/frac_${pct}"
+        DATA_DIR="${DATA_BASE}/frac_${pct}/exec_${EXECUTOR_COUNT}"
         echo "Training on ${DATA_DIR} with ${GPU} GPU(s)"
         uv run train-model \
             --data "${DATA_DIR}" \

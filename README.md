@@ -48,8 +48,8 @@ For more information, visit: https://bigearth.net/
 bigearthnet-dl-distributed/
 ├── scripts/
 │   ├── bash/
-│   │   ├── run_conversion.sh    # Convert data for multiple percentages
-│   │   └── run_training.sh      # Train on multiple datasets
+│   │   ├── convert.sh           # Convert data for multiple fractions and executors
+│   │   └── train.sh             # Train on multiple datasets with varying GPUs
 │   ├── gen_metadata.py          # Generate metadata with S3 paths
 │   ├── check.py                 # Validate S3 file availability
 │   ├── to_petastorm.py          # Convert TIF to Petastorm format
@@ -123,20 +123,23 @@ uv run gen-metadata \
 
 ### Step 2: Convert Data to Petastorm Format
 
-Option A: Convert multiple percentages using bash script
+Option A: Convert multiple fractions using bash script
 
 ```bash
-./scripts/bash/run_conversion.sh experiment_1
+./scripts/bash/convert.sh experiment_1 client
 ```
 
-This processes 1%, 3%, 5%, 7%, and 10% of the data and creates:
+This processes 1%, 5%, 10%, and 20% of the data with varying executor counts and creates:
 ```
 s3://ubs-homes/erasmus/raj/dlproject/experiments/experiment_1/petastorm/
-├── 1percent/
-├── 3percent/
-├── 5percent/
-├── 7percent/
-└── 10percent/
+├── frac_0.01/
+│   ├── exec_8/
+│   ├── exec_5/
+│   ├── exec_2/
+│   └── exec_1/
+├── frac_0.05/
+├── frac_0.10/
+└── frac_0.20/
 ```
 
 Option B: Convert single percentage manually using spark-submit
@@ -158,10 +161,12 @@ spark-submit \
 
 ### Step 3: Train Models
 
-Option A: Train on all converted datasets
+Option A: Train on all converted datasets with multiple GPU configurations
 
 ```bash
-./scripts/bash/run_training.sh experiment_1
+# Usage: ./scripts/bash/train.sh <experiment_name> <profile_name> <executor_count>
+# Note: executor_count should match one used in conversion (default: 8)
+./scripts/bash/train.sh experiment_1 train 8
 ```
 
 Option B: Train on single dataset
@@ -178,20 +183,23 @@ uv run train-model \
 
 To modify script parameters, edit the configuration values directly in the bash scripts:
 
-**scripts/bash/run_conversion.sh:**
+**scripts/bash/convert.sh:**
 ```bash
-EXECUTOR_MEM="8g"        # Spark executor memory
-DRIVER_MEM="4g"          # Spark driver memory
-CORES="4"                # Cores per executor
-N_EXECUTORS="3"          # Number of executors
-SPARK_PACKAGES="ch.cern.sparkmeasure:spark-measure_2.12:0.27"
+EXECUTOR_MEM="16g"       # Spark executor memory
+DRIVER_MEM="8g"          # Spark driver memory
+CORES="3"                # Cores per executor
+TARGET_FILE_MB="50"      # Target output file size
+N_EXECUTORS=(8 5 2 1)    # Number of executors to test
+FRACTIONS=(0.01 0.05 0.10 0.20)  # Data fractions to process
 ```
 
-**scripts/bash/run_training.sh:**
+**scripts/bash/train.sh:**
 ```bash
 EPOCHS="10"              # Training epochs
 BATCH_SIZE="16"          # Batch size per replica
 LEARNING_RATE="0.001"    # Learning rate
+FRACTIONS=(0.01 0.05 0.10 0.20)  # Data fractions to train on
+GPUS=(4 3 2 1)           # GPU counts to test
 ```
 
 ## Data Organization
@@ -204,19 +212,19 @@ s3://ubs-homes/erasmus/raj/dlproject/
 └── experiments/
     └── experiment_1/
         └── petastorm/
-            ├── 1percent/
-            │   ├── train/           # Training data
-            │   ├── validation/      # Validation data
-            │   ├── test/            # Test data
-            │   └── profile/
-            │       ├── conversion_profile.json
-            │       ├── conversion_profile.log
-            │       ├── train_profile.json
-            │       └── train_profile.log
-            ├── 3percent/
-            ├── 5percent/
-            ├── 7percent/
-            └── 10percent/
+            ├── frac_0.01/
+            │   └── exec_8/
+            │       ├── train/           # Training data
+            │       ├── validation/      # Validation data
+            │       ├── test/            # Test data
+            │       └── profile/
+            │           ├── conversion_profile.json
+            │           ├── conversion_profile.log
+            │           ├── train_profile.json
+            │           └── train_profile.log
+            ├── frac_0.05/
+            ├── frac_0.10/
+            └── frac_0.20/
 ```
 
 ## Profiling

@@ -17,7 +17,7 @@ CORES="3"
 TARGET_FILE_MB="50" 
 
 
-N_EXECUTORS=(8 4 2 1)
+N_EXECUTORS=(8 5 2 1)
 FRACTIONS=(0.01 0.05 0.10 0.20)
 
 echo "Starting Conversion: ${EXPERIMENT_NAME}"

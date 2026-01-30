@@ -381,10 +381,6 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
             .config(
                 "spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem"
             )
-            .config(
-                "spark.jars.packages",
-                "org.apache.spark:spark-sql_2.12:3.1.2,org.apache.hadoop:hadoop-aws:3.3.1",
-            )
             .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.1")
             .config("spark.executor.memory", args.executor_mem)
             .config("spark.driver.memory", args.driver_mem)
@@ -397,16 +393,16 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
             .config(
                 "spark.sql.shuffle.partitions",
                 str((args.core * args.n_executor) * 4),
-            )  # Rule of thumb: 2-4 partitions per core for optimal parallelism
+            )  # rule of thumb : 2-4 partitions per core
             .config(
-                "spark.sql.files.maxPartitionBytes", str(134217728)
-            )  # 128MB max partition size to prevent memory issues
+                "spark.sql.files.maxPartitionBytes", "268435456"
+            )  # 256MB # intiial partition size
             .config(
                 "spark.sql.adaptive.enabled", "true"
-            )  # Let Spark optimize shuffle partitions dynamically based on data size
+            )  # let spark optimize the shuffle partitions
             .config(
-                "spark.sql.adaptive.advisoryPartitionSizeInBytes", str(134217728 / 2)
-            )  # 64MB target partition size for adaptive optimization
+                "spark.sql.adaptive.advisoryPartitionSizeInBytes", "134217728"
+            )  # 128MB # source : https://spark.apache.org/docs/latest/sql-performance-tuning.html
             .getOrCreate()
         )
 

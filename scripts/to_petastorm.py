@@ -460,11 +460,12 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
                     rdd = rdd.mapPartitions(lambda x: process_partition(x, schema))
 
                     df_spark = spark.createDataFrame(rdd, schema.as_spark_schema())
-                    df_spark = (
-                        df_spark.coalesce(output_partitions)
-                        if output_partitions < spark_partitions
-                        else df_spark.repartition(output_partitions)
-                    )
+                    df_spark.repartition(output_partitions)
+                    # df_spark = (
+                    #     df_spark.coalesce(output_partitions)
+                    #     if output_partitions < spark_partitions
+                    #     else df_spark.repartition(output_partitions)
+                    # )
                     df_spark.write.mode("overwrite").parquet(out_path)
 
             profiler.log(f"Saved {name} to {out_path}")

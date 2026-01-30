@@ -1,12 +1,14 @@
 import argparse
 import json
 import os
+import platform
 import time
 import warnings
 from contextlib import contextmanager
 from datetime import datetime
 
 import numpy as np
+import psutil
 import pyarrow.parquet as pq
 import s3fs
 from petastorm.codecs import NdarrayCodec
@@ -15,15 +17,63 @@ from petastorm.unischema import Unischema, UnischemaField, dict_to_spark_row
 from pyspark.sql import SparkSession
 from rasterio.io import MemoryFile
 
-# from scripts.profiler import Profiler
 
-# from profiler import Profiler # run this if you are using docker standalone scripts
+def get_host_info():
+    info = {
+        "hostname": platform.node(),
+        "platform": platform.system(),
+        "cpu_count": psutil.cpu_count(logical=True),
+        "ram_gb": round(psutil.virtual_memory().total / (1024**3), 2),
+    }
+    try:
+        import tensorflow as tf  # tf might not be available in spart so had to be inside try
+
+        gpus = tf.config.list_physical_devices("GPU")
+        if gpus:
+            info["cuda"] = {
+                "device_count": len(gpus),
+                "devices": [{"name": g.name} for g in gpus],
+            }
+    except ImportError:
+        pass
+    return info
+
+
+def get_usage():
+    usage = {
+        "cpu_percent": psutil.cpu_percent(),
+        "ram_percent": psutil.virtual_memory().percent,
+        "ram_used_gb": round(psutil.virtual_memory().used / (1024**3), 2),
+    }
+    try:
+        import tensorflow as tf
+
+        gpus = tf.config.list_physical_devices("GPU")
+        if gpus:
+            gpu_usage = []
+            for i, g in enumerate(gpus):
+                try:
+                    mem_info = tf.config.experimental.get_memory_info(g.name)
+                    gpu_usage.append(
+                        {
+                            "device": i,
+                            "memory_used_gb": round(mem_info["current"] / (1024**3), 2),
+                            "memory_peak_gb": round(mem_info["peak"] / (1024**3), 2),
+                        }
+                    )
+                except Exception:
+                    gpu_usage.append({"device": i, "memory_used_gb": None})
+            usage["cuda"] = gpu_usage
+    except ImportError:
+        pass
+    return usage
 
 
 class Profiler:
     def __init__(self):
         self.metrics = {
             "start_time": datetime.now().isoformat(),
+            "host_info": get_host_info(),
             "steps": [],
             "summary": {},
         }
@@ -53,9 +103,17 @@ class Profiler:
 
     def log(self, message):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_entry = f"[{timestamp}] {message}"
+        usage = get_usage()
+        usage_str = f"CPU:{usage['cpu_percent']}% RAM:{usage['ram_used_gb']}GB({usage['ram_percent']}%)"
+        if "cuda" in usage:
+            for g in usage["cuda"]:
+                if g["memory_used_gb"] is not None:
+                    usage_str += f" GPU{g['device']}:{g['memory_used_gb']}GB"
+        log_entry = f"[{timestamp}] [{usage_str}] {message}"
         print(log_entry)
-        self.log_messages.append(log_entry)
+        self.log_messages.append(
+            {"timestamp": timestamp, "message": message, "usage": usage}
+        )
 
     def record(self, key, value):
         print(f"Recorded : {key} = {value}")
@@ -67,6 +125,7 @@ class Profiler:
         self.metrics["end_time"] = datetime.now().isoformat()
         total = sum(s["duration"] for s in self.metrics["steps"])
         self.metrics["summary"]["total_duration"] = total
+        self.metrics["logs"] = self.log_messages
 
         is_s3 = output_dir.startswith(("s3://", "s3a://"))
         base_dir = output_dir.replace("s3a://", "s3://") if is_s3 else output_dir
@@ -78,10 +137,26 @@ class Profiler:
         json_content = json.dumps(self.metrics, indent=2)
         log_lines = [f"Profile Report - {self.metrics['start_time']}\n{'='*60}\n"]
 
+        hi = self.metrics["host_info"]
+        log_lines.append(
+            f"Host: {hi['hostname']} | CPU: {hi['cpu_count']} cores | RAM: {hi['ram_gb']}GB"
+        )
+        if "cuda" in hi:
+            log_lines.append(f" | CUDA: {hi['cuda']['device_count']} GPU(s)")
+        log_lines.append(f"\n{'='*60}\n")
+
         if self.log_messages:
             log_lines.append("\nLog Messages:\n")
-            for msg in self.log_messages:
-                log_lines.append(f"{msg}\n")
+            for entry in self.log_messages:
+                u = entry["usage"]
+                usage_str = f"CPU:{u['cpu_percent']}% RAM:{u['ram_used_gb']}GB"
+                if "cuda" in u:
+                    for g in u["cuda"]:
+                        if g["memory_used_gb"] is not None:
+                            usage_str += f" GPU{g['device']}:{g['memory_used_gb']}GB"
+                log_lines.append(
+                    f"[{entry['timestamp']}] [{usage_str}] {entry['message']}\n"
+                )
             log_lines.append(f"\n{'='*60}\n")
 
         log_lines.append("\nStep Durations:\n")
@@ -96,7 +171,7 @@ class Profiler:
 
         log_lines.append(f"\n{'='*60}\n")
         log_lines.append(
-            f"Total:  {self.metrics['summary']. get('total_duration', 0):.2f}s\n"
+            f"Total:  {self.metrics['summary'].get('total_duration', 0):.2f}s\n"
         )
 
         for key, val in self.metrics["summary"].items():
@@ -233,7 +308,9 @@ def process_partition(rows, schema):
 
 def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
     profiler = Profiler()
-    profiler.log(f"Starting conversion with fraction {fraction}")
+    profiler.log(
+        f"Starting conversion with fraction {fraction}, {args.n_executor} exec"
+    )
 
     # Read Metadata
     with profiler.step("read_metadata"):
@@ -276,14 +353,14 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
                 str((args.core * args.n_executor) * 4),
             )  # rule of thumb : 2-4 partitions per core
             .config(
-                "spark.sql.files.maxPartitionBytes", "268435456"
-            )  # 256MB # intiial partition size
+                "spark.sql.files.maxPartitionBytes", str(134217728)
+            )  # 128MB # max partition size
             .config(
                 "spark.sql.adaptive.enabled", "true"
             )  # let spark optimize the shuffle partitions
             .config(
-                "spark.sql.adaptive.advisoryPartitionSizeInBytes", "134217728"
-            )  # 128MB # source : https://spark.apache.org/docs/latest/sql-performance-tuning.html
+                "spark.sql.adaptive.advisoryPartitionSizeInBytes", str(134217728 / 2)
+            )  # 64MB # source : https://spark.apache.org/docs/latest/sql-performance-tuning.html
             .getOrCreate()
         )
 
@@ -297,37 +374,63 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
     )
 
     try:
+
+        total_rows = sum(len(s) for s in splits.values())
+        bytes_per_row = (120 * 120 * 6 * 4) + (
+            120 * 120
+        )  # it is coming from above schema , 6 image bands with 120/120 image size and labels is basically 120/120, * 4 for float32
+        dataset_size_gb = round((total_rows * bytes_per_row) / (1024**3), 2)
+        profiler.record("total_rows", total_rows)
+        profiler.record("dataset_size_gb", dataset_size_gb)
+
         for name, split_df in splits.items():
             if split_df.empty:
                 continue
 
-            # calculate partitions , we need to control the size of the output files , initially we did by controlling the parition numbers but if we can approx estimate filesize why not do it by file size ?
-            bytes_per_row = (120 * 120 * 6 * 4) + (
-                120
-                * 120  # * 4 is back again because image is float 32 and label is uint8 , so 8*4 ,
-            )  # it is coming from above schema , 6 image bands with 120/120 image size and labels is basically 120/120
             rows_per_file = int(
                 (args.target_file_mb * 1024**2) / (bytes_per_row * 0.4)
-            )  # 0.4 compression factor, i am putting this as approximate , idk honestly how much is the compression factor as it depends upon the type of the data being compressed
-            partitions = max(1, len(split_df) // rows_per_file)
+            )  # 0.4 compression factor
+            output_partitions = max(1, len(split_df) // rows_per_file)
+
+            # internal spark partitions: based on data size with target_file_mb as partition size
+            total_data_bytes = len(split_df) * bytes_per_row
+            target_partition_bytes = args.target_file_mb * 1024**2
+            profiler.record(f"{name}_total_data_size_gb", total_data_bytes / (1024**3))
+            data_based_partitions = max(
+                1, int(total_data_bytes / target_partition_bytes)
+            )
+            min_partitions = (
+                args.core * args.n_executor * 2
+            )  # at least 2 per core for parallelism
+            spark_partitions = max(
+                data_based_partitions, min_partitions
+            )  # whichever is maximum
 
             profiler.log(
-                f"Processing {name}: {len(split_df)} rows, {partitions} partitions"
+                f"Processing {name}: {len(split_df)} rows, {spark_partitions} spark partitions, {output_partitions} output partitions"
             )
-
+            profiler.record(f"{name}_data_based_partitions", data_based_partitions)
             out_path = os.path.join(output_dir, name)
 
             with profiler.step(f"write_{name}"):
                 with materialize_dataset(spark, out_path, schema, args.target_file_mb):
-                    rdd = sc.parallelize(split_df.to_dict("records"), partitions)
+                    rdd = sc.parallelize(split_df.to_dict("records"), spark_partitions)
                     rdd = rdd.mapPartitions(lambda x: process_partition(x, schema))
 
                     df_spark = spark.createDataFrame(rdd, schema.as_spark_schema())
+                    df_spark = (
+                        df_spark.coalesce(output_partitions)
+                        if output_partitions < spark_partitions
+                        else df_spark.repartition(output_partitions)
+                    )
                     df_spark.write.mode("overwrite").parquet(out_path)
 
             profiler.log(f"Saved {name} to {out_path}")
             profiler.record(f"{name}_samples", len(split_df))
-            profiler.record(f"{name}_partitions", partitions)
+            tasks_per_executor = max(1, spark_partitions // args.n_executor)
+            profiler.record(f"{name}_tasks_per_executor", tasks_per_executor)
+            profiler.record(f"{name}_spark_partitions", spark_partitions)
+            profiler.record(f"{name}_output_partitions", output_partitions)
 
     finally:
         spark.stop()

@@ -3,17 +3,17 @@
 # BigEarthNet Training Script
 
 ROOT_DIR="s3://ubs-homes/erasmus/raj/dlproject/experiments"
-EXPERIMENT_NAME="${1:-experiment_1}"
+EXPERIMENT_NAME="${1:-experiment_final}"
 TRAIN_PROFILE_NAME="${2:-train}"
 # NO_OF_GPUS="${3:-2}"
 
-DATA_BASE="${ROOT_DIR}/${EXPERIMENT_NAME}/petastorm"
+DATA_BASE="${ROOT_DIR}/${EXPERIMENT_NAME}/exec_8/petastorm"
 
 EPOCHS="10"
 BATCH_SIZE="16"
 LEARNING_RATE="0.001"
 
-FRACTIONS=(0.01 0.03 0.05 0.10)
+FRACTIONS=(0.01 0.05 0.10 0.20)
 GPUS=(4 3 2 1)
 
 echo "Starting Training: ${EXPERIMENT_NAME}"

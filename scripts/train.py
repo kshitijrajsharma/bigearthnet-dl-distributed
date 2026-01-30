@@ -11,7 +11,7 @@ import s3fs
 import tensorflow as tf
 from petastorm import make_reader
 
-from scripts.profiler import Profiler
+from scripts import Profiler
 
 tf.config.optimizer.set_jit(False)
 
@@ -20,6 +20,16 @@ os.environ["PYTHONWARNINGS"] = (
 )
 warnings.filterwarnings("ignore", category=FutureWarning, module="petastorm")
 warnings.filterwarnings("ignore", category=FutureWarning, module="pyarrow")
+
+
+def setup_gpu_memory_growth():
+    gpus = tf.config.list_physical_devices("GPU")
+    for gpu in gpus:
+        try:
+            tf.config.experimental.set_memory_growth(gpu, True)
+            return True
+        except RuntimeError:
+            return False
 
 
 def record_metrics(profiler, **kwargs):
@@ -31,15 +41,7 @@ def log_gpu_info(profiler):
     gpus = tf.config.list_physical_devices("GPU")
     profiler.log(f"GPUs detected: {len(gpus)}")
     profiler.record("gpu_count", len(gpus))
-    if gpus:
-        for i, gpu in enumerate(gpus):
-            try:
-                profiler.log(
-                    f"GPU {i}: {tf.config.experimental.get_device_details(gpu)}"
-                )
-            except Exception:
-                pass
-    else:
+    if not gpus:
         profiler.log("WARNING: No GPUs - training on CPU")
     return len(gpus)
 
@@ -145,6 +147,7 @@ def train_model(
     profiler = Profiler()
     profiler.log(f"Args: {args_str}")
     profiler.record("no_gpus_input", no_of_gpus)
+    profiler.record("set_gpu_mem_growth", setup_gpu_memory_growth())
 
     try:
         with profiler.step("gpu_setup"):

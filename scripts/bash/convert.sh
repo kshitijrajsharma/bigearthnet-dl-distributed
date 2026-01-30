@@ -5,7 +5,7 @@
 
 METADATA_PATH="s3a://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet"
 ROOT_DIR="s3a://ubs-homes/erasmus/raj/dlproject/experiments"
-EXPERIMENT_NAME="${1:-experiment_1}"
+EXPERIMENT_NAME="${1:-experiment_final}"
 DEPLOY_MODE="${2:-cluster}"
 
 OUTPUT_BASE="${ROOT_DIR}/${EXPERIMENT_NAME}/petastorm"
@@ -14,11 +14,11 @@ OUTPUT_BASE="${ROOT_DIR}/${EXPERIMENT_NAME}/petastorm"
 EXECUTOR_MEM="16g"
 DRIVER_MEM="8g"
 CORES="4"
-TARGET_FILE_MB="45" 
+TARGET_FILE_MB="50" 
 
 
 N_EXECUTORS=(8 4 2 1)
-FRACTIONS=(0.01 0.03 0.05 0.10)
+FRACTIONS=(0.01 0.05 0.10 0.20)
 
 echo "Starting Conversion: ${EXPERIMENT_NAME}"
 echo "Output Base: ${OUTPUT_BASE}"

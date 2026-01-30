@@ -2,7 +2,7 @@
 
 This directory is for storing analysis results, plots, and reports derived from experiments.
 
-## Suggested Organization
+##  Organization
 
 ```
 results/

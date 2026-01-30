@@ -381,6 +381,10 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
             .config(
                 "spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem"
             )
+            .config(
+                "spark.jars.packages",
+                "org.apache.spark:spark-sql_2.12:3.1.2,org.apache.hadoop:hadoop-aws:3.3.1",
+            )
             .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.1")
             .config("spark.executor.memory", args.executor_mem)
             .config("spark.driver.memory", args.driver_mem)

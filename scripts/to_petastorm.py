@@ -448,7 +448,7 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
                 data_based_partitions, min_partitions
             )  # Use the larger value to ensure both data distribution and parallelism
 
-            spark_partitions = data_based_partitions
+            # spark_partitions = spark_partitions
 
             profiler.log(
                 f"Processing {name}: {len(split_df)} rows, {spark_partitions} spark partitions, {output_partitions} output partitions"
@@ -458,7 +458,7 @@ def convert_to_petastorm(metadata_path, output_dir, fraction=1.0, args=None):
 
             with profiler.step(f"write_{name}"):
                 with materialize_dataset(spark, out_path, schema, args.target_file_mb):
-                    rdd = sc.parallelize(split_df.to_dict("records"), spark_partitions)
+                    rdd = sc.parallelize(split_df.to_dict("records"), min_partitions)
                     rdd = rdd.mapPartitions(lambda x: process_partition(x, schema))
 
                     df_spark = spark.createDataFrame(rdd, schema.as_spark_schema())

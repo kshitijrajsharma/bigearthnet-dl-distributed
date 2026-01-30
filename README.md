@@ -113,6 +113,7 @@ Note: to_petastorm.py should be run using spark-submit (not uv run) as it uses S
 
 ### Step 1: One-Time Setup
 
+
 Generate metadata with S3 file paths:
 
 ```bash
@@ -120,6 +121,9 @@ uv run gen-metadata \
   --meta s3://ubs-datasets/bigearthnet/metadata.parquet \
   --out s3://ubs-homes/erasmus/raj/dlproject/metadata_with_paths.parquet
 ```
+
+You should run `scripts/check.py` to ensure all the files are present in s3 which are included in the metadata.parquet.
+
 
 ### Step 2: Convert Data to Petastorm Format
 
